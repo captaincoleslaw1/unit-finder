@@ -105,7 +105,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v5</p>
+<p class="ver">Unit Finder v6</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -295,6 +295,13 @@ function searchName(name){
   return kept.join(" ");
 }
 
+function goSearch(url){
+  // Same-tab two-hop: our page reloads with ?go= and then navigates on load.
+  // iOS hands a tapped google.com link straight to the Google app, but a
+  // navigation that happens on page load stays in Safari. Back then returns here.
+  window.location.href = location.pathname + "?go=" + encodeURIComponent(url);
+}
+
 // ---------- Search link building ----------
 function buildSearches(){
   var name = $("f-name").value.trim();
@@ -370,7 +377,7 @@ function buildSearches(){
     var small = document.createElement("small");
     small.textContent = s.hint;
     b.appendChild(small);
-    b.addEventListener("click", function(){ window.open(s.url, "_blank"); b.classList.add("done"); });
+    b.addEventListener("click", function(){ b.classList.add("done"); goSearch(s.url); });
     box.appendChild(b);
   });
 }
@@ -587,6 +594,17 @@ $("captureBtn").addEventListener("click", async function(){
 // If camera permission was already granted to this site, open the viewfinder on load.
 // (Browsers will not let a page force the camera on with no tap and no prior permission.)
 window.addEventListener("load", async function(){
+  // Returning from a search button? Finish the hop. The URL is cleaned first
+  // so Back from the search lands on this page, not on the redirect.
+  try {
+    var goParam = new URLSearchParams(window.location.search).get("go");
+    if(goParam && /^https:\/\//i.test(goParam)){
+      history.replaceState(null, "", window.location.pathname);
+      $("status").textContent = "Taking you to the search. Use Back to return here.";
+      window.location.assign(goParam);
+      return;
+    }
+  } catch(e) {}
   try {
     if(navigator.permissions && navigator.permissions.query){
       var st = await navigator.permissions.query({ name: "camera" });
