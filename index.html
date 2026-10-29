@@ -40,6 +40,7 @@
 
 <div class="card">
   <h2>1. Photo the address block</h2>
+  <p class="note" style="margin:0 0 10px">Fill the frame with <b>just the address block</b>, not the whole mailer. Big headlines and pictures confuse the reader. The app also re-reads tighter crops on its own if the first pass looks shaky.</p>
   <input type="file" id="photo" accept="image/*" style="display:none">
   <button class="big" id="photoBtn">📷 Take / Pick Photo</button>
   <img id="preview" alt="">
@@ -87,7 +88,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v1</p>
+<p class="ver">Unit Finder v2</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -115,18 +116,43 @@ function slugCap(s){
 }
 
 // ---------- Address parsing from OCR text ----------
+var STREET_SUFFIX = /\b(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\b\.?/i;
+
+function cleanName(l){
+  var out = l.replace(/[^A-Za-z .'-]/g," ").replace(/\s+/g," ").trim();
+  out = out.replace(/^\s*(Mr|Mrs|Ms|Miss|Dr)\.?\s+/i,"");
+  out = smartCase(out);
+  out = out.replace(/^The\s+/i,"");
+  out = out.replace(/\s+(Household|Family|Residence|Residents|Occupant)$/i,"");
+  return smartCase(out.trim());
+}
+
+function plausibleName(l){
+  var t = l.replace(/[^A-Za-z .'-]/g," ").replace(/\s+/g," ").trim();
+  if(!t) return false;
+  var words = t.split(" ").filter(Boolean);
+  if(words.length < 1 || words.length > 5) return false;
+  var single = 0;
+  for(var i=0;i<words.length;i++){
+    if(!/^[A-Za-z][A-Za-z.'-]*$/.test(words[i])) return false;
+    if(words[i].replace(/[.']/g,"").length === 1) single++;
+  }
+  return single < 2;
+}
+
 function parseAddress(text){
-  var out = { name:"", street:"", city:"", state:"", zip:"", zip4:"" };
+  var out = { name:"", street:"", city:"", state:"", zip:"", zip4:"", sortZip:"" };
   var raw = text.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 1; });
 
   var zip4m = text.match(/\b(\d{5})-(\d{4})\b/);
   if(zip4m) out.zip4 = zip4m[0];
+  var sortm = text.match(/5[-\s]*DIGIT\s+(\d{5})/i);
+  if(sortm) out.sortZip = sortm[1];
 
-  // Drop obvious non-address lines
-  var junk = /(first[\s-]*class|us postage|postage|pitney|indicia|presort|bulk rate|permit|return service|electronic service|www\.|http|\.com)/i;
+  var junk = /(first[\s-]*class|us postage|postage|pitney|indicia|presort|bulk rate|permit|return service|electronic service|current resident|www\.|http|\.com)/i;
   var lines = raw.filter(function(l){ return !junk.test(l); });
 
-  // Find the city/state/ZIP line
+  // City / state / ZIP line
   var cityIdx = -1, m = null;
   for(var i=0;i<lines.length;i++){
     var mm = lines[i].match(/^([A-Za-z][A-Za-z .]*?),?\s+([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
@@ -138,37 +164,49 @@ function parseAddress(text){
     out.zip = m[3];
   }
 
-  // Street line: starts with a number, sits above the city line (or anywhere if no city line)
   var streetIdx = -1;
-  var limit = (cityIdx >= 0 ? cityIdx : lines.length);
-  for(var j=0;j<limit;j++){
-    if(/^\d{1,6}\s+\S+/.test(lines[j]) && !/\b\d{5}\b/.test(lines[j].replace(/^\d+\s+/,""))){
-      streetIdx = j; // keep scanning: the LAST number-led line above city is the street
+  // Anchored: street is one of the 3 lines directly above the city line
+  if(cityIdx > 0){
+    for(var a=cityIdx-1; a>=Math.max(0,cityIdx-3); a--){
+      if(/^\d{1,6}\s+\S+/.test(lines[a])){ streetIdx = a; break; }
     }
   }
+  // Fallback: a number-led line that also carries a street suffix
   if(streetIdx < 0){
-    for(var k=0;k<lines.length;k++){
-      if(k !== cityIdx && /^\d{1,6}\s+[A-Za-z]/.test(lines[k])){ streetIdx = k; break; }
+    for(var j=0;j<lines.length;j++){
+      if(j !== cityIdx && /^\d{1,6}\s+[A-Za-z]/.test(lines[j]) && STREET_SUFFIX.test(lines[j])){ streetIdx = j; break; }
     }
   }
-  if(streetIdx >= 0){
-    out.street = smartCase(lines[streetIdx].replace(/\s+/g," "));
-  }
+  if(streetIdx >= 0) out.street = smartCase(lines[streetIdx].replace(/\s+/g," "));
 
-  // Name: the most name-like line above the street line (letters only, 2+ words)
-  var nameLimit = (streetIdx >= 0 ? streetIdx : (cityIdx >= 0 ? cityIdx : 0));
-  for(var n=nameLimit-1;n>=0;n--){
-    var l = lines[n];
-    if(/\d/.test(l)) continue;
-    var words = l.replace(/[^A-Za-z .'-]/g,"").trim().split(/\s+/).filter(Boolean);
-    if(words.length >= 2){ out.name = smartCase(l.replace(/[^A-Za-z .'-]/g,"").replace(/^\s*(Mr|Mrs|Ms|Miss|Dr)\.?\s+/i,"")); break; }
-  }
-  // Fallback: line directly above street/city
-  if(!out.name && nameLimit > 0){
-    var cand = lines[nameLimit-1];
-    if(cand && !/\d/.test(cand)) out.name = smartCase(cand);
+  // Name: a plausible line just above the street (or just above the city line)
+  var anchor = (streetIdx >= 0 ? streetIdx : cityIdx);
+  if(anchor > 0){
+    for(var n=anchor-1; n>=Math.max(0,anchor-2); n--){
+      if(plausibleName(lines[n])){ out.name = cleanName(lines[n]); break; }
+    }
+    if(!out.name){
+      for(var n2=anchor-1; n2>=0; n2--){
+        if(plausibleName(lines[n2])){ out.name = cleanName(lines[n2]); break; }
+      }
+    }
   }
   return out;
+}
+
+function scoreParse(p){
+  var s = 0;
+  if(p.zip) s += 3;
+  if(p.city) s += 3;
+  if(p.state) s += 2;
+  if(p.street){
+    s += 3;
+    if(STREET_SUFFIX.test(p.street)) s += 4;
+    if(/[§|~^_=<>*]/.test(p.street)) s -= 6;
+  }
+  if(p.name) s += 3;
+  if(p.sortZip) s += 1;
+  return s;
 }
 
 // ---------- Search link building ----------
@@ -178,6 +216,7 @@ function buildSearches(){
   var city = $("f-city").value.trim();
   var state = $("f-state").value.trim().toUpperCase();
   var zip = $("f-zip").value.trim();
+  var citySearch = city.replace(/\s+Township$/i,"");
   var box = $("searches");
   if(!name || !street){
     box.innerHTML = '<p class="note">Fill in at least the name and street above and the search buttons appear here, already filled in.</p>';
@@ -195,19 +234,19 @@ function buildSearches(){
   searches.push({
     label: "FastPeopleSearch",
     hint: "Free, usually shows the unit right in the result",
-    url: "https://www.fastpeoplesearch.com/name/" + slugHyphen(name) + "_" + slugHyphen(city) + "-" + state.toLowerCase()
+    url: "https://www.fastpeoplesearch.com/name/" + slugHyphen(name) + "_" + slugHyphen(citySearch) + "-" + state.toLowerCase()
   });
 
   searches.push({
     label: "TruePeopleSearch",
     hint: "Free, lists current address with unit when it has one",
-    url: "https://www.truepeoplesearch.com/results?name=" + q(name) + "&citystatezip=" + q(city + ", " + state)
+    url: "https://www.truepeoplesearch.com/results?name=" + q(name) + "&citystatezip=" + q(citySearch + ", " + state)
   });
 
   searches.push({
     label: "Whitepages",
     hint: "Name + town lookup",
-    url: "https://www.whitepages.com/name/" + slugCap(name) + "/" + slugCap(city) + "-" + state
+    url: "https://www.whitepages.com/name/" + slugCap(name) + "/" + slugCap(citySearch) + "-" + state
   });
 
   var stateName = STATE_NAMES[state] || "";
@@ -215,7 +254,7 @@ function buildSearches(){
     searches.push({
       label: "Spokeo",
       hint: "Name + town lookup",
-      url: "https://www.spokeo.com/" + slugCap(name) + "/" + slugCap(stateName) + "/" + slugCap(city)
+      url: "https://www.spokeo.com/" + slugCap(name) + "/" + slugCap(stateName) + "/" + slugCap(citySearch)
     });
   }
 
@@ -277,44 +316,99 @@ $("copyBtn").addEventListener("click", function(){
   }
 });
 
-// ---------- Photo + OCR ----------
+// ---------- Photo + OCR (multi-crop: full shot, then tighter crops until a read scores well) ----------
 $("photoBtn").addEventListener("click", function(){ $("photo").click(); });
 
-$("photo").addEventListener("change", function(){
+function loadImg(file){
+  return new Promise(function(res, rej){
+    var img = new Image();
+    img.onload = function(){ res(img); };
+    img.onerror = rej;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function makeCanvas(img, y0, y1){
+  var sw = img.naturalWidth, sh = img.naturalHeight;
+  var sy = Math.floor(sh * y0), hh = Math.floor(sh * (y1 - y0));
+  var scale = 1;
+  if(sw > 1900) scale = 1900 / sw;
+  else if(sw < 1200) scale = Math.min(2.2, 1400 / sw);
+  var c = document.createElement("canvas");
+  c.width = Math.floor(sw * scale); c.height = Math.floor(hh * scale);
+  var ctx = c.getContext("2d");
+  ctx.drawImage(img, 0, sy, sw, hh, 0, 0, c.width, c.height);
+  // Grayscale + contrast stretch: flat, even text reads far better
+  try {
+    var im = ctx.getImageData(0, 0, c.width, c.height), d = im.data;
+    var n = c.width * c.height, gray = new Uint8Array(n), min = 255, max = 0, i, g;
+    for(i = 0; i < n; i++){ g = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000; gray[i] = g; if(g < min) min = g; if(g > max) max = g; }
+    var range = Math.max(1, max - min), v;
+    for(i = 0; i < n; i++){ v = (gray[i] - min) * 255 / range; d[i*4] = v; d[i*4+1] = v; d[i*4+2] = v; }
+    ctx.putImageData(im, 0, 0);
+  } catch(e){}
+  return c;
+}
+
+$("photo").addEventListener("change", async function(){
   var file = this.files && this.files[0];
+  this.value = "";
   if(!file) return;
   var prev = $("preview");
   prev.src = URL.createObjectURL(file);
   prev.style.display = "block";
-  $("status").textContent = "Reading the photo… 0%";
   if(typeof Tesseract === "undefined"){
     $("status").textContent = "The reading library did not load (needs a connection the first time). Check signal and reload, or type the address in below.";
     return;
   }
-  Tesseract.recognize(file, "eng", {
-    logger: function(msg){
-      if(msg.status === "recognizing text"){
-        $("status").textContent = "Reading the photo… " + Math.round(msg.progress * 100) + "%";
-      }
-    }
-  }).then(function(result){
-    var parsed = parseAddress(result.data.text);
-    if(parsed.name) $("f-name").value = parsed.name;
-    if(parsed.street) $("f-street").value = parsed.street;
-    if(parsed.city) $("f-city").value = parsed.city;
-    if(parsed.state) $("f-state").value = parsed.state;
-    if(parsed.zip) $("f-zip").value = parsed.zip;
-    if(parsed.zip4) $("zip4info").textContent = "Printed on the envelope: ZIP+4 " + parsed.zip4 + " (that's the building, not the unit).";
-    buildSearches();
-    if(parsed.name || parsed.street){
-      $("status").textContent = "Got it. Check the fields below, fix any slips, then tap a search.";
-    } else {
-      $("status").textContent = "Could not pull an address out of that photo. Try a closer, straighter shot of just the address block, or type it in below.";
-    }
-  }).catch(function(err){
-    $("status").textContent = "Reading failed. Try again, or type the address in below.";
-  });
-  this.value = "";
+  $("status").textContent = "Reading the photo…";
+  var img;
+  try { img = await loadImg(file); } catch(e){ $("status").textContent = "Could not open that photo. Try again."; return; }
+
+  var worker = null;
+  try {
+    worker = await Tesseract.createWorker("eng");
+    try { await worker.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
+  } catch(e){ worker = null; }
+
+  var crops = [[0,1],[0,0.5],[0,0.38],[0.12,0.62],[0.3,0.85]];
+  var best = null, bestScore = -1;
+  for(var k = 0; k < crops.length; k++){
+    $("status").textContent = "Reading the photo… pass " + (k+1) + " of " + crops.length;
+    try {
+      var canvas = makeCanvas(img, crops[k][0], crops[k][1]);
+      var result = worker ? await worker.recognize(canvas) : await Tesseract.recognize(canvas, "eng");
+      var parsed = parseAddress(result.data.text);
+      var sc = scoreParse(parsed);
+      if(sc > bestScore){ bestScore = sc; best = parsed; }
+      if(bestScore >= 16) break;
+    } catch(e){}
+  }
+  if(worker){ try { await worker.terminate(); } catch(e){} }
+
+  if(!best || bestScore <= 0){
+    $("status").textContent = "Could not read that one at all. Retake it closer, filling the frame with just the address block, or type it in below.";
+    return;
+  }
+  if(best.name) $("f-name").value = best.name;
+  if(best.street && (STREET_SUFFIX.test(best.street) || bestScore >= 8)) $("f-street").value = best.street;
+  if(best.city) $("f-city").value = best.city;
+  if(best.state) $("f-state").value = best.state;
+  var notes = [];
+  if(best.zip4) notes.push("Printed on the piece: ZIP+4 " + best.zip4 + " (that is the building, not the unit).");
+  if(best.sortZip && best.zip && best.sortZip !== best.zip){
+    notes.push("The mailer printed ZIP " + best.zip + ", but its own sorting line says " + best.sortZip + ", so the searches use " + best.sortZip + ". Fix the ZIP field if you disagree.");
+    $("f-zip").value = best.sortZip;
+  } else if(best.zip){
+    $("f-zip").value = best.zip;
+  }
+  $("zip4info").textContent = notes.join(" ");
+  buildSearches();
+  if(bestScore >= 13){
+    $("status").textContent = "Got it. Check the fields below, fix any slips, then tap a search.";
+  } else {
+    $("status").textContent = "That read is shaky, so double-check every field. A closer photo of just the address block reads much better.";
+  }
 });
 </script>
 </body>
