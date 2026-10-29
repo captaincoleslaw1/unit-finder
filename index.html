@@ -105,7 +105,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v6</p>
+<p class="ver">Unit Finder v7</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -296,10 +296,9 @@ function searchName(name){
 }
 
 function goSearch(url){
-  // Same-tab two-hop: our page reloads with ?go= and then navigates on load.
-  // iOS hands a tapped google.com link straight to the Google app, but a
-  // navigation that happens on page load stays in Safari. Back then returns here.
-  window.location.href = location.pathname + "?go=" + encodeURIComponent(url);
+  // Same tab, plain navigation. The search engines used here are not claimed
+  // by an installed app, so iOS keeps the results in Safari. Back returns here.
+  window.location.href = url;
 }
 
 // ---------- Search link building ----------
@@ -323,15 +322,21 @@ function buildSearches(){
   var searches = [];
 
   searches.push({
-    label: "Google (start here)",
-    hint: "No quotes on purpose: Google matches however the address happens to be written",
-    url: "https://www.google.com/search?q=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
+    label: "Web search (start here)",
+    hint: "DuckDuckGo, opens right here in Safari. No quotes on purpose: matches however the address is written",
+    url: "https://duckduckgo.com/?q=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
   });
 
   searches.push({
-    label: "Google: exact name",
-    hint: "Name in quotes, town loose",
-    url: "https://www.google.com/search?q=" + q('"' + nameLoose + '" ' + citySearch + " " + state)
+    label: "Web search: exact name",
+    hint: "DuckDuckGo with the name in quotes, town loose",
+    url: "https://duckduckgo.com/?q=" + q('"' + nameLoose + '" ' + citySearch + " " + state)
+  });
+
+  searches.push({
+    label: "Web search (Bing)",
+    hint: "Same loose search on a second index, in case the first one misses",
+    url: "https://www.bing.com/search?q=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
   });
 
   searches.push({
@@ -363,9 +368,9 @@ function buildSearches(){
 
   if(streetNameOnly){
     searches.push({
-      label: "Google: last name + street",
+      label: "Web search: last name + street",
       hint: "Catches listings under a nickname or a different first name",
-      url: "https://www.google.com/search?q=" + q(surname + ' "' + streetNameOnly + '" ' + zip)
+      url: "https://duckduckgo.com/?q=" + q(surname + ' "' + streetNameOnly + '" ' + zip)
     });
   }
 
@@ -594,17 +599,6 @@ $("captureBtn").addEventListener("click", async function(){
 // If camera permission was already granted to this site, open the viewfinder on load.
 // (Browsers will not let a page force the camera on with no tap and no prior permission.)
 window.addEventListener("load", async function(){
-  // Returning from a search button? Finish the hop. The URL is cleaned first
-  // so Back from the search lands on this page, not on the redirect.
-  try {
-    var goParam = new URLSearchParams(window.location.search).get("go");
-    if(goParam && /^https:\/\//i.test(goParam)){
-      history.replaceState(null, "", window.location.pathname);
-      $("status").textContent = "Taking you to the search. Use Back to return here.";
-      window.location.assign(goParam);
-      return;
-    }
-  } catch(e) {}
   try {
     if(navigator.permissions && navigator.permissions.query){
       var st = await navigator.permissions.query({ name: "camera" });
