@@ -29,6 +29,12 @@
   .ghost { display: block; width: 100%; padding: 11px; margin-top: 10px; font-size: 15px; background: none; color: #0b5fff; }
   .note { font-size: 13px; color: #5a6b84; line-height: 1.45; }
   #zip4info { font-size: 14px; color: #33415c; margin-top: 8px; }
+
+  .videobox { position: relative; }
+  #guide { position: absolute; left: 5%; top: 12%; width: 90%; height: 38%; border: 3px solid #ffd60a; border-radius: 10px; background: rgba(255,214,10,.07); pointer-events: none; }
+  .search-btn.primary { background: #0b5fff; color: #fff; border-color: #0b5fff; font-size: 19px; }
+  .search-btn.primary small { color: #d7e5ff; }
+  .search-btn.done { opacity: .45; }
   .ver { text-align: center; color: #9aa7ba; font-size: 12px; margin: 18px 0 6px; }
   img#preview { max-width: 100%; border-radius: 10px; margin-top: 10px; display: none; }
 </style>
@@ -39,10 +45,19 @@
 <p class="sub">Letter with no apartment number? Photo it, check the fields, then tap a search. The unit, if it's out there, is one of these.</p>
 
 <div class="card">
-  <h2>1. Photo the address block</h2>
-  <p class="note" style="margin:0 0 10px">Fill the frame with <b>just the address block</b>, not the whole mailer. Big headlines and pictures confuse the reader. The app also re-reads tighter crops on its own if the first pass looks shaky.</p>
+  <h2>1. Scan the address block</h2>
+  <p class="note" style="margin:0 0 10px">Line up <b>just the address block</b> inside the yellow box, not the whole mailer. Big headlines and pictures confuse the reader. No live camera? Use a library photo instead, the app re-reads tighter crops on its own.</p>
+  <div id="camWrap" style="display:none">
+    <div class="videobox">
+      <video id="cam" playsinline muted style="width:100%; border-radius:10px; background:#000; display:block"></video>
+      <div id="guide"></div>
+    </div>
+    <button class="big" id="captureBtn" style="margin-top:10px">Capture Address</button>
+    <button class="ghost" id="stopCamBtn">Close camera</button>
+  </div>
+  <button class="big" id="liveBtn">Open Camera</button>
   <input type="file" id="photo" accept="image/*" style="display:none">
-  <button class="big" id="photoBtn">📷 Take / Pick Photo</button>
+  <button class="ghost" id="photoBtn">Use a photo from the library instead</button>
   <img id="preview" alt="">
   <div id="status">Or just type the name and address below.</div>
   <div id="zip4info"></div>
@@ -76,7 +91,7 @@
   <div id="searches">
     <p class="note">Fill in the fields above and the search buttons appear here, already filled in. No typing on the route.</p>
   </div>
-  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit.</p>
+  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit. Buttons dim once tapped, so you can keep your place working down the list.</p>
 </div>
 
 <div class="card">
@@ -88,7 +103,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v2</p>
+<p class="ver">Unit Finder v3</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -209,6 +224,56 @@ function scoreParse(p){
   return s;
 }
 
+
+// ---------- ZIP-anchor parsing: find the city/state/ZIP line by position, walk up ----------
+function parseAnchored(data){
+  if(!data || !data.lines || !data.lines.length) return null;
+  var geo = [];
+  data.lines.forEach(function(L){
+    var t = (L.text || "").trim();
+    if(t.length > 1 && L.bbox) geo.push({ text: t, x0: L.bbox.x0, y0: L.bbox.y0, x1: L.bbox.x1, y1: L.bbox.y1 });
+  });
+  if(!geo.length) return null;
+  var CITYZIP = /^([A-Za-z][A-Za-z .]*?),?\s+([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/;
+  var anchor = null, anchorM = null, bestRank = -1;
+  geo.forEach(function(l){
+    var mm = l.text.match(CITYZIP);
+    if(mm){
+      var h = l.y1 - l.y0;
+      var rank = l.y1 + h * 10; // recipient block: bigger type, lower on the page beats a return address
+      if(rank > bestRank){ bestRank = rank; anchor = l; anchorM = mm; }
+    }
+  });
+  if(!anchor) return null;
+  var out = { name: "", street: "", city: smartCase(anchorM[1].replace(/,+$/, "")), state: anchorM[2].toUpperCase(), zip: anchorM[3], zip4: "", sortZip: "" };
+  var z4 = (data.text || "").match(/\b(\d{5})-(\d{4})\b/); if(z4) out.zip4 = z4[0];
+  var sm = (data.text || "").match(/5[-\s]*DIGIT\s+(\d{5})/i); if(sm) out.sortZip = sm[1];
+  var junk = /(first[\s-]*class|us postage|postage|pitney|indicia|presort|bulk rate|permit|return service|electronic service|current resident|www\.|http|\.com)/i;
+  var ah = Math.max(10, anchor.y1 - anchor.y0);
+  var above = geo.filter(function(l){ return l !== anchor && l.y1 <= anchor.y0 + 4; }).sort(function(a, b){ return b.y0 - a.y0; });
+  var prevY = anchor.y0, pendingName = "";
+  for(var i = 0; i < above.length && i < 8; i++){
+    var l = above[i];
+    if(prevY - l.y1 > ah * 3.2) break; // big vertical gap: the block above is a different block (return address)
+    prevY = l.y0;
+    var t = l.text;
+    if(CITYZIP.test(t)) break; // another block's city line: we have left the address block
+    if(junk.test(t) || /5[-\s]*DIGIT/i.test(t) || !/[A-Za-z0-9]/.test(t)) continue;
+    if(!out.street){
+      if(/^\d{1,6}\s+\S+/.test(t)){ out.street = smartCase(t.replace(/\s+/g, " ")); continue; }
+      if(!pendingName && plausibleName(t)) pendingName = cleanName(t);
+      continue;
+    }
+    if(!out.name){
+      if(plausibleName(t)){ out.name = cleanName(t); break; }
+      continue;
+    }
+  }
+  if(!out.name && pendingName) out.name = pendingName;
+  if(!out.street && !out.name) return null;
+  return out;
+}
+
 // ---------- Search link building ----------
 function buildSearches(){
   var name = $("f-name").value.trim();
@@ -226,7 +291,7 @@ function buildSearches(){
   var searches = [];
 
   searches.push({
-    label: "Google",
+    label: "Google (start here)",
     hint: "Exact name + street, in quotes",
     url: "https://www.google.com/search?q=" + q('"' + name + '" "' + street.replace(/\.$/,"") + '" ' + city + " " + state)
   });
@@ -265,15 +330,15 @@ function buildSearches(){
   });
 
   box.innerHTML = "";
-  searches.forEach(function(s){
+  searches.forEach(function(s, idx){
     var b = document.createElement("button");
-    b.className = "search-btn";
+    b.className = "search-btn" + (idx === 0 ? " primary" : "");
     b.innerHTML = "";
     b.appendChild(document.createTextNode("🔍 " + s.label));
     var small = document.createElement("small");
     small.textContent = s.hint;
     b.appendChild(small);
-    b.addEventListener("click", function(){ window.open(s.url, "_blank"); });
+    b.addEventListener("click", function(){ window.open(s.url, "_blank"); b.classList.add("done"); });
     box.appendChild(b);
   });
 }
@@ -316,9 +381,7 @@ $("copyBtn").addEventListener("click", function(){
   }
 });
 
-// ---------- Photo + OCR (multi-crop: full shot, then tighter crops until a read scores well) ----------
-$("photoBtn").addEventListener("click", function(){ $("photo").click(); });
-
+// ---------- OCR engine: multi-pass, ZIP-anchor parse preferred, text parse as fallback ----------
 function loadImg(file){
   return new Promise(function(res, rej){
     var img = new Image();
@@ -328,8 +391,7 @@ function loadImg(file){
   });
 }
 
-function makeCanvas(img, y0, y1){
-  var sw = img.naturalWidth, sh = img.naturalHeight;
+function makeCanvas(source, sw, sh, y0, y1, mode){
   var sy = Math.floor(sh * y0), hh = Math.floor(sh * (y1 - y0));
   var scale = 1;
   if(sw > 1900) scale = 1900 / sw;
@@ -337,57 +399,25 @@ function makeCanvas(img, y0, y1){
   var c = document.createElement("canvas");
   c.width = Math.floor(sw * scale); c.height = Math.floor(hh * scale);
   var ctx = c.getContext("2d");
-  ctx.drawImage(img, 0, sy, sw, hh, 0, 0, c.width, c.height);
-  // Grayscale + contrast stretch: flat, even text reads far better
+  ctx.drawImage(source, 0, sy, sw, hh, 0, 0, c.width, c.height);
   try {
     var im = ctx.getImageData(0, 0, c.width, c.height), d = im.data;
     var n = c.width * c.height, gray = new Uint8Array(n), min = 255, max = 0, i, g;
     for(i = 0; i < n; i++){ g = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000; gray[i] = g; if(g < min) min = g; if(g > max) max = g; }
     var range = Math.max(1, max - min), v;
-    for(i = 0; i < n; i++){ v = (gray[i] - min) * 255 / range; d[i*4] = v; d[i*4+1] = v; d[i*4+2] = v; }
+    for(i = 0; i < n; i++){
+      v = (gray[i] - min) * 255 / range;
+      if(mode === "binary") v = v > 150 ? 255 : 0;
+      d[i*4] = v; d[i*4+1] = v; d[i*4+2] = v;
+    }
     ctx.putImageData(im, 0, 0);
   } catch(e){}
   return c;
 }
 
-$("photo").addEventListener("change", async function(){
-  var file = this.files && this.files[0];
-  this.value = "";
-  if(!file) return;
-  var prev = $("preview");
-  prev.src = URL.createObjectURL(file);
-  prev.style.display = "block";
-  if(typeof Tesseract === "undefined"){
-    $("status").textContent = "The reading library did not load (needs a connection the first time). Check signal and reload, or type the address in below.";
-    return;
-  }
-  $("status").textContent = "Reading the photo…";
-  var img;
-  try { img = await loadImg(file); } catch(e){ $("status").textContent = "Could not open that photo. Try again."; return; }
-
-  var worker = null;
-  try {
-    worker = await Tesseract.createWorker("eng");
-    try { await worker.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
-  } catch(e){ worker = null; }
-
-  var crops = [[0,1],[0,0.5],[0,0.38],[0.12,0.62],[0.3,0.85]];
-  var best = null, bestScore = -1;
-  for(var k = 0; k < crops.length; k++){
-    $("status").textContent = "Reading the photo… pass " + (k+1) + " of " + crops.length;
-    try {
-      var canvas = makeCanvas(img, crops[k][0], crops[k][1]);
-      var result = worker ? await worker.recognize(canvas) : await Tesseract.recognize(canvas, "eng");
-      var parsed = parseAddress(result.data.text);
-      var sc = scoreParse(parsed);
-      if(sc > bestScore){ bestScore = sc; best = parsed; }
-      if(bestScore >= 16) break;
-    } catch(e){}
-  }
-  if(worker){ try { await worker.terminate(); } catch(e){} }
-
+function fillResult(best, bestScore){
   if(!best || bestScore <= 0){
-    $("status").textContent = "Could not read that one at all. Retake it closer, filling the frame with just the address block, or type it in below.";
+    $("status").textContent = "Could not read that one at all. Retake it closer, with just the address block in the frame, or type it in below.";
     return;
   }
   if(best.name) $("f-name").value = best.name;
@@ -407,8 +437,115 @@ $("photo").addEventListener("change", async function(){
   if(bestScore >= 13){
     $("status").textContent = "Got it. Check the fields below, fix any slips, then tap a search.";
   } else {
-    $("status").textContent = "That read is shaky, so double-check every field. A closer photo of just the address block reads much better.";
+    $("status").textContent = "That read is shaky, so double-check every field. A closer shot of just the address block reads much better.";
   }
+}
+
+async function ocrSource(source, sw, sh, tight){
+  $("status").textContent = "Reading…";
+  var worker = null;
+  try {
+    worker = await Tesseract.createWorker("eng");
+    try { await worker.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
+  } catch(e){ worker = null; }
+  var passes = tight
+    ? [[0, 1, "stretch"], [0, 1, "binary"]]
+    : [[0, 1, "stretch"], [0, 0.55, "stretch"], [0.12, 0.7, "stretch"], [0, 1, "binary"]];
+  var best = null, bestScore = -1;
+  for(var k = 0; k < passes.length; k++){
+    $("status").textContent = "Reading… pass " + (k + 1) + " of " + passes.length;
+    try {
+      var canvas = makeCanvas(source, sw, sh, passes[k][0], passes[k][1], passes[k][2]);
+      var result = worker ? await worker.recognize(canvas) : await Tesseract.recognize(canvas, "eng");
+      var tp = parseAddress(result.data.text);
+      var sc = scoreParse(tp);
+      var ap = parseAnchored(result.data);
+      if(ap){
+        var asc = scoreParse(ap) + 2; // anchor bonus: a position-verified block beats a text-only guess
+        if(asc > sc){ tp = ap; sc = asc; }
+      }
+      if(sc > bestScore){ bestScore = sc; best = tp; }
+      if(bestScore >= 17) break;
+    } catch(e){}
+  }
+  if(worker){ try { await worker.terminate(); } catch(e){} }
+  fillResult(best, bestScore);
+}
+
+// ---------- Library photo ----------
+$("photoBtn").addEventListener("click", function(){ $("photo").click(); });
+$("photo").addEventListener("change", async function(){
+  var file = this.files && this.files[0];
+  this.value = "";
+  if(!file) return;
+  var prev = $("preview");
+  prev.src = URL.createObjectURL(file);
+  prev.style.display = "block";
+  if(typeof Tesseract === "undefined"){
+    $("status").textContent = "The reading library did not load (needs a connection the first time). Check signal and reload, or type the address in below.";
+    return;
+  }
+  var img;
+  try { img = await loadImg(file); } catch(e){ $("status").textContent = "Could not open that photo. Try again."; return; }
+  ocrSource(img, img.naturalWidth, img.naturalHeight, false);
+});
+
+// ---------- Live camera ----------
+var stream = null;
+var GUIDE = { x: 0.05, y: 0.12, w: 0.90, h: 0.38 };
+async function startCam(auto){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    if(!auto) $("status").textContent = "Live camera is not available here. Use a library photo instead.";
+    return false;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 } }, audio: false });
+    var v = $("cam");
+    v.srcObject = stream;
+    await v.play();
+    $("camWrap").style.display = "block";
+    $("liveBtn").style.display = "none";
+    return true;
+  } catch(e){
+    if(!auto) $("status").textContent = "Camera was blocked. Allow camera access for this site in Safari settings, or use a library photo instead.";
+    return false;
+  }
+}
+function stopCam(){
+  if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; }
+  $("camWrap").style.display = "none";
+  $("liveBtn").style.display = "block";
+}
+$("liveBtn").addEventListener("click", function(){ startCam(false); });
+$("stopCamBtn").addEventListener("click", stopCam);
+$("captureBtn").addEventListener("click", async function(){
+  var v = $("cam");
+  if(!v.videoWidth) return;
+  var vw = v.videoWidth, vh = v.videoHeight;
+  var cw = Math.floor(GUIDE.w * vw), ch = Math.floor(GUIDE.h * vh);
+  var scale = Math.min(2, 1600 / cw); if(scale < 1) scale = 1;
+  var c = document.createElement("canvas");
+  c.width = Math.floor(cw * scale); c.height = Math.floor(ch * scale);
+  c.getContext("2d").drawImage(v, GUIDE.x * vw, GUIDE.y * vh, cw, ch, 0, 0, c.width, c.height);
+  var prev = $("preview");
+  try { prev.src = c.toDataURL("image/jpeg", 0.85); prev.style.display = "block"; } catch(e){}
+  stopCam();
+  if(typeof Tesseract === "undefined"){
+    $("status").textContent = "The reading library did not load (needs a connection the first time). Check signal and reload.";
+    return;
+  }
+  ocrSource(c, c.width, c.height, true);
+});
+
+// If camera permission was already granted to this site, open the viewfinder on load.
+// (Browsers will not let a page force the camera on with no tap and no prior permission.)
+window.addEventListener("load", async function(){
+  try {
+    if(navigator.permissions && navigator.permissions.query){
+      var st = await navigator.permissions.query({ name: "camera" });
+      if(st.state === "granted") startCam(true);
+    }
+  } catch(e){}
 });
 </script>
 </body>
