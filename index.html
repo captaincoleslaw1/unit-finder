@@ -67,6 +67,9 @@
 
 <div class="card">
   <h2>2. Search for the missing unit</h2>
+  <button class="big" id="mineBtn" style="background:#0f766e">🤖 Suggest the unit for me</button>
+  <div id="mineStatus" class="note" style="margin-top:8px"></div>
+  <div id="mineResult"></div>
   <div id="searches">
     <p class="note">The search buttons appear here once a scan fills the fields below, already filled in. No typing on the route.</p>
   </div>
@@ -105,7 +108,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v8</p>
+<p class="ver">Unit Finder v9</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -606,6 +609,187 @@ window.addEventListener("load", async function(){
     }
   } catch(e){}
 });
+// ---------- Snippet miner (prototype): suggests, never fills on its own ----------
+// Reads search-result pages through a reader relay and mines the snippets
+// (titles + preview text) for unit numbers tied to the name + street.
+// A candidate only counts when the surname and the street (or full name)
+// appear in the same neighborhood of text, which filters out other
+// residents' units listed for the same building.
+var PEOPLE_DOMAINS = ["fastpeoplesearch.com","truepeoplesearch.com","spokeo.com","whitepages.com","unmask.com","thatsthem.com","beenverified.com","peoplefinders.com","nuwber.com","familytreenow.com","mylife.com","veripages.com","nationalpublicdata.com","reunion.com","usphonebook.com","searchpeoplefree.com","anywho.com","411.com"];
+function escReM(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function cleanRelayText(t){
+  return String(t)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\((https?[^)]*)\)/g, function(_, txt, url){
+       var u = url, m = url.match(/[?&]uddg=([^&]+)/);
+       if(m){ try { u = decodeURIComponent(m[1]); } catch(e){} }
+       return " " + txt + " (" + u + ") ";
+    })
+    .replace(/\*\*/g, " ")
+    .replace(/#{1,6}\s+/g, " ")
+    .replace(/\s+/g, " ");
+}
+function extractFromText(rawText, ctx, engineLabel){
+  var text = cleanRelayText(rawText);
+  var urlSpans = [], um, urlRe = /\(https?[^)]*\)/g;
+  while((um = urlRe.exec(text)) !== null){ urlSpans.push([um.index, um.index + um[0].length]); }
+  function inUrl(pos){ for(var i = 0; i < urlSpans.length; i++){ if(pos >= urlSpans[i][0] && pos <= urlSpans[i][1]) return true; } return false; }
+  var domMarks = [], dm, domRe = /(?:www\.)?([a-z0-9-]+\.(?:com|net|org|io|info|us|co))\b/gi;
+  while((dm = domRe.exec(text)) !== null){ domMarks.push({ pos: dm.index, domain: dm[1].toLowerCase() }); }
+  function domainNear(pos){
+    var lastAny = "", lastPeople = "";
+    for(var i = 0; i < domMarks.length; i++){
+      if(domMarks[i].pos > pos) break;
+      if(pos - domMarks[i].pos < 1500){
+        lastAny = domMarks[i].domain;
+        if(PEOPLE_DOMAINS.indexOf(domMarks[i].domain) >= 0) lastPeople = domMarks[i].domain;
+      }
+    }
+    return lastPeople || (lastAny && lastAny !== "duckduckgo.com" && lastAny !== "bing.com" ? lastAny : "") || "search results";
+  }
+  var byUnit = {};
+  var unitRe = /\b(?:Apt|Apartment|Unit|Ste|Suite)\s*\.?\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b|#\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b/gi;
+  var m;
+  while((m = unitRe.exec(text)) !== null){
+    var tok = (m[1] || m[2] || "").toUpperCase();
+    if(!tok || !/\d/.test(tok)) continue;
+    if(inUrl(m.index)) continue;
+    var win = text.slice(Math.max(0, m.index - 450), m.index + 220);
+    if(!new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(win)) continue;
+    var hasStreet = ctx.streetCore ? new RegExp(escReM(ctx.streetCore), "i").test(win) : false;
+    var hasName = ctx.nameLoose ? new RegExp(escReM(ctx.nameLoose), "i").test(win) : false;
+    if(!(hasStreet || (hasName && !ctx.streetCore))) continue;
+    var dom = domainNear(m.index);
+    if(!byUnit[tok]) byUnit[tok] = { unit: tok, score: 0, domains: {}, evidence: [] };
+    var entry = byUnit[tok];
+    if(!entry.domains[dom]){
+      entry.domains[dom] = true;
+      entry.score += PEOPLE_DOMAINS.indexOf(dom) >= 0 ? 2 : 1;
+    }
+    if(entry.evidence.length < 3){
+      var ss = text.lastIndexOf(". ", Math.max(0, m.index - 220));
+      var se = text.indexOf(". ", m.index + tok.length);
+      var snippet = text.slice(Math.max(ss >= 0 ? ss + 2 : 0, m.index - 110), se >= 0 ? se + 1 : m.index + 160)
+        .replace(/\(https?[^)]*\)/g, "").replace(/\S{40,}/g, "").replace(/\s+/g, " ").trim();
+      entry.evidence.push({ domain: dom, engine: engineLabel, text: snippet.slice(0, 190) });
+    }
+  }
+  return byUnit;
+}
+function mergeCandidates(into, from){
+  Object.keys(from).forEach(function(k){
+    if(!into[k]){ into[k] = from[k]; return; }
+    var a = into[k], b = from[k];
+    Object.keys(b.domains).forEach(function(d){
+      if(!a.domains[d]){ a.domains[d] = true; a.score += PEOPLE_DOMAINS.indexOf(d) >= 0 ? 2 : 1; }
+    });
+    b.evidence.forEach(function(ev){ if(a.evidence.length < 3) a.evidence.push(ev); });
+  });
+  return into;
+}
+function fetchTextM(url, ms){
+  return new Promise(function(resolve){
+    var ctl = ("AbortController" in window) ? new AbortController() : null;
+    var t = setTimeout(function(){ if(ctl) ctl.abort(); }, ms || 20000);
+    fetch(url, ctl ? { signal: ctl.signal } : {}).then(function(r){ return r.text(); }).then(function(txt){
+      clearTimeout(t); resolve(txt || "");
+    }).catch(function(){ clearTimeout(t); resolve(""); });
+  });
+}
+async function runMiner(){
+  var name = $("f-name").value.trim();
+  var street = $("f-street").value.trim();
+  var city = $("f-city").value.trim();
+  var state = $("f-state").value.trim().toUpperCase();
+  var btn = $("mineBtn"), st = $("mineStatus"), out = $("mineResult");
+  out.innerHTML = "";
+  if(!name || !street){
+    st.textContent = "Scan a letter or fill the name and street in section 3 first, then I can go looking.";
+    return;
+  }
+  var nameLoose = searchName(name);
+  var streetQ = splitUnit(street).street;
+  var surname = nameLoose.split(" ").slice(-1)[0];
+  var streetCore = streetQ.replace(/^\s*\d+\s+/, "").replace(/\s+(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\.?$/i, "").trim();
+  var ctx = { surname: surname, nameLoose: nameLoose, streetCore: streetCore };
+  var queries = [
+    surname + ' "' + streetQ + '" unit',
+    '"' + nameLoose + '" ' + city + " " + state
+  ];
+  var engines = [
+    { label: "DuckDuckGo", url: function(q){ return "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q); } },
+    { label: "Bing", url: function(q){ return "https://www.bing.com/search?q=" + encodeURIComponent(q); } }
+  ];
+  btn.disabled = true;
+  var merged = {}, gotAny = false, step = 0, total = queries.length * engines.length;
+  for(var ei = 0; ei < engines.length; ei++){
+    for(var qi = 0; qi < queries.length; qi++){
+      step++;
+      st.textContent = "Reading " + engines[ei].label + " snippets… pass " + step + " of " + total + " (through a relay, a few seconds each)";
+      var txt = await fetchTextM("https://r.jina.ai/" + engines[ei].url(queries[qi]), 22000);
+      if(txt && txt.length > 200){ gotAny = true; mergeCandidates(merged, extractFromText(txt, ctx, engines[ei].label)); }
+    }
+  }
+  btn.disabled = false;
+  if(!gotAny){
+    st.textContent = "The snippet relay did not answer this time. The buttons below still work the regular way.";
+    return;
+  }
+  var rawCands = Object.keys(merged).map(function(k){ return merged[k]; }).sort(function(a,b){ return b.score - a.score; });
+  var cands = rawCands.filter(function(c){ return c.score >= 2; });
+  if(!cands.length){
+    st.textContent = rawCands.length
+      ? "Only faint single mentions turned up for " + nameLoose + " at " + streetQ + ", not enough to suggest in good faith. Work the buttons below."
+      : "No unit turned up in the snippets for " + nameLoose + " at " + streetQ + ". That happens a lot; work the buttons below.";
+    return;
+  }
+  var top = cands[0];
+  var nSources = Object.keys(top.domains).length;
+  var tier = top.score >= 4 ? "Strong: " + nSources + " sources agree." :
+             top.score >= 2 ? "One solid source. Treat it as a lead and sanity-check it." :
+                              "Weak: a single passing mention. Verify before trusting it.";
+  st.textContent = "";
+  var card = document.createElement("div");
+  card.style.cssText = "border:2px solid #0f766e; border-radius:12px; padding:12px; margin-top:10px; background:#f0fdfa";
+  var head = document.createElement("div");
+  head.style.cssText = "font-size:18px; font-weight:700";
+  head.textContent = "Suggested unit: " + top.unit;
+  card.appendChild(head);
+  var tierEl = document.createElement("div");
+  tierEl.style.cssText = "font-size:14px; margin:4px 0 8px";
+  tierEl.textContent = tier;
+  card.appendChild(tierEl);
+  top.evidence.forEach(function(ev){
+    var e = document.createElement("div");
+    e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
+    e.textContent = ev.domain + " (via " + ev.engine + "): “" + ev.text + "”";
+    card.appendChild(e);
+  });
+  if(cands[1]){
+    var alt = document.createElement("div");
+    alt.style.cssText = "font-size:13px; color:#7a4d00; margin-top:6px";
+    alt.textContent = "Another candidate showed up: " + cands[1].unit + " (" + Object.keys(cands[1].domains).length + " source). Mixed signals, extra reason to check.";
+    card.appendChild(alt);
+  }
+  var row = document.createElement("div");
+  row.style.cssText = "display:flex; gap:8px; margin-top:10px";
+  var acc = document.createElement("button");
+  acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
+  acc.addEventListener("click", function(){
+    $("f-unit").value = top.unit;
+    $("f-unit").dataset.label = "Unit";
+    out.innerHTML = "";
+    st.textContent = "Unit " + top.unit + " filled in at the bottom. Hit Copy Complete Address when ready.";
+    $("copyBtn").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+  var dis = document.createElement("button");
+  dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
+  dis.addEventListener("click", function(){ out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
+  row.appendChild(acc); row.appendChild(dis);
+  card.appendChild(row);
+  out.appendChild(card);
+}
+$("mineBtn").addEventListener("click", runMiner);
 </script>
 </body>
 </html>
