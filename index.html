@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Unit Finder">
+<title>Unit Finder</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background: #f2f4f7; color: #14213d; }
+  h1 { font-size: 24px; margin: 4px 0 2px; }
+  .sub { color: #5a6b84; font-size: 14px; margin: 0 0 16px; }
+  .card { background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .card h2 { font-size: 16px; margin: 0 0 10px; }
+  button { font: inherit; border: 0; border-radius: 10px; cursor: pointer; }
+  .big { display: block; width: 100%; padding: 16px; font-size: 18px; font-weight: 600; background: #0b5fff; color: #fff; }
+  .big:active { background: #0849c4; }
+  #status { min-height: 20px; font-size: 14px; color: #33415c; margin-top: 10px; white-space: pre-wrap; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #5a6b84; margin: 10px 0 4px; }
+  input { width: 100%; font: inherit; font-size: 17px; padding: 11px; border: 1.5px solid #c7d0dd; border-radius: 9px; background: #fff; }
+  input:focus { outline: none; border-color: #0b5fff; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .search-btn { display: block; width: 100%; text-align: left; padding: 14px; margin-top: 10px; font-size: 17px; font-weight: 600; background: #eaf1ff; color: #0b3d91; border: 1.5px solid #b9cffe; }
+  .search-btn small { display: block; font-weight: 400; font-size: 13px; color: #5a6b84; margin-top: 2px; }
+  .search-btn:active { background: #d6e4ff; }
+  .go { display: block; width: 100%; padding: 14px; margin-top: 12px; font-size: 17px; font-weight: 600; background: #188038; color: #fff; }
+  .ghost { display: block; width: 100%; padding: 11px; margin-top: 10px; font-size: 15px; background: none; color: #0b5fff; }
+  .note { font-size: 13px; color: #5a6b84; line-height: 1.45; }
+  #zip4info { font-size: 14px; color: #33415c; margin-top: 8px; }
+  .ver { text-align: center; color: #9aa7ba; font-size: 12px; margin: 18px 0 6px; }
+  img#preview { max-width: 100%; border-radius: 10px; margin-top: 10px; display: none; }
+</style>
+</head>
+<body>
+
+<h1>🔎 Unit Finder</h1>
+<p class="sub">Letter with no apartment number? Photo it, check the fields, then tap a search. The unit, if it's out there, is one of these.</p>
+
+<div class="card">
+  <h2>1. Photo the address block</h2>
+  <input type="file" id="photo" accept="image/*" style="display:none">
+  <button class="big" id="photoBtn">📷 Take / Pick Photo</button>
+  <img id="preview" alt="">
+  <div id="status">Or just type the name and address below.</div>
+  <div id="zip4info"></div>
+</div>
+
+<div class="card">
+  <h2>2. Check the fields (fix any reading slips)</h2>
+  <label for="f-name">Name</label>
+  <input id="f-name" autocomplete="off" placeholder="Jane Doe">
+  <label for="f-street">Street address (no unit)</label>
+  <input id="f-street" autocomplete="off" placeholder="1741 Raleigh Court E.">
+  <div class="row">
+    <div>
+      <label for="f-city">City</label>
+      <input id="f-city" autocomplete="off" placeholder="Ocean">
+    </div>
+    <div style="flex:0 0 70px">
+      <label for="f-state">State</label>
+      <input id="f-state" autocomplete="off" placeholder="NJ" maxlength="2">
+    </div>
+    <div style="flex:0 0 96px">
+      <label for="f-zip">ZIP</label>
+      <input id="f-zip" autocomplete="off" inputmode="numeric" placeholder="07712" maxlength="10">
+    </div>
+  </div>
+  <button class="ghost" id="sampleBtn">Fill in a sample to test the searches</button>
+</div>
+
+<div class="card">
+  <h2>3. Search for the missing unit</h2>
+  <div id="searches">
+    <p class="note">Fill in the fields above and the search buttons appear here, already filled in. No typing on the route.</p>
+  </div>
+  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit.</p>
+</div>
+
+<div class="card">
+  <h2>4. Found it?</h2>
+  <label for="f-unit">Apartment / unit number</label>
+  <input id="f-unit" autocomplete="off" placeholder="120B">
+  <button class="go" id="copyBtn">Copy Complete Address</button>
+  <div id="copyStatus" style="font-size:14px; margin-top:8px; color:#33415c"></div>
+</div>
+
+<p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
+<p class="ver">Unit Finder v1</p>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+var $ = function(id){ return document.getElementById(id); };
+
+var STATE_NAMES = {AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming",DC:"District of Columbia"};
+
+function smartCase(s){
+  s = s.trim().replace(/\s+/g," ");
+  // If the text is mostly uppercase (or lowercase), normalize to Title Case; leave mixed case alone.
+  var letters = s.replace(/[^A-Za-z]/g,"");
+  if(!letters) return s;
+  var upper = letters.replace(/[^A-Z]/g,"").length;
+  if(upper / letters.length > 0.7 || upper === 0){
+    return s.toLowerCase().replace(/\b([a-z])/g, function(m,c){ return c.toUpperCase(); });
+  }
+  return s;
+}
+
+function slugHyphen(s){
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+}
+function slugCap(s){
+  return smartCase(s).replace(/[^A-Za-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+}
+
+// ---------- Address parsing from OCR text ----------
+function parseAddress(text){
+  var out = { name:"", street:"", city:"", state:"", zip:"", zip4:"" };
+  var raw = text.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 1; });
+
+  var zip4m = text.match(/\b(\d{5})-(\d{4})\b/);
+  if(zip4m) out.zip4 = zip4m[0];
+
+  // Drop obvious non-address lines
+  var junk = /(first[\s-]*class|us postage|postage|pitney|indicia|presort|bulk rate|permit|return service|electronic service|www\.|http|\.com)/i;
+  var lines = raw.filter(function(l){ return !junk.test(l); });
+
+  // Find the city/state/ZIP line
+  var cityIdx = -1, m = null;
+  for(var i=0;i<lines.length;i++){
+    var mm = lines[i].match(/^([A-Za-z][A-Za-z .]*?),?\s+([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+    if(mm){ cityIdx = i; m = mm; }
+  }
+  if(m){
+    out.city = smartCase(m[1].replace(/,+$/,""));
+    out.state = m[2].toUpperCase();
+    out.zip = m[3];
+  }
+
+  // Street line: starts with a number, sits above the city line (or anywhere if no city line)
+  var streetIdx = -1;
+  var limit = (cityIdx >= 0 ? cityIdx : lines.length);
+  for(var j=0;j<limit;j++){
+    if(/^\d{1,6}\s+\S+/.test(lines[j]) && !/\b\d{5}\b/.test(lines[j].replace(/^\d+\s+/,""))){
+      streetIdx = j; // keep scanning: the LAST number-led line above city is the street
+    }
+  }
+  if(streetIdx < 0){
+    for(var k=0;k<lines.length;k++){
+      if(k !== cityIdx && /^\d{1,6}\s+[A-Za-z]/.test(lines[k])){ streetIdx = k; break; }
+    }
+  }
+  if(streetIdx >= 0){
+    out.street = smartCase(lines[streetIdx].replace(/\s+/g," "));
+  }
+
+  // Name: the most name-like line above the street line (letters only, 2+ words)
+  var nameLimit = (streetIdx >= 0 ? streetIdx : (cityIdx >= 0 ? cityIdx : 0));
+  for(var n=nameLimit-1;n>=0;n--){
+    var l = lines[n];
+    if(/\d/.test(l)) continue;
+    var words = l.replace(/[^A-Za-z .'-]/g,"").trim().split(/\s+/).filter(Boolean);
+    if(words.length >= 2){ out.name = smartCase(l.replace(/[^A-Za-z .'-]/g,"").replace(/^\s*(Mr|Mrs|Ms|Miss|Dr)\.?\s+/i,"")); break; }
+  }
+  // Fallback: line directly above street/city
+  if(!out.name && nameLimit > 0){
+    var cand = lines[nameLimit-1];
+    if(cand && !/\d/.test(cand)) out.name = smartCase(cand);
+  }
+  return out;
+}
+
+// ---------- Search link building ----------
+function buildSearches(){
+  var name = $("f-name").value.trim();
+  var street = $("f-street").value.trim();
+  var city = $("f-city").value.trim();
+  var state = $("f-state").value.trim().toUpperCase();
+  var zip = $("f-zip").value.trim();
+  var box = $("searches");
+  if(!name || !street){
+    box.innerHTML = '<p class="note">Fill in at least the name and street above and the search buttons appear here, already filled in.</p>';
+    return;
+  }
+  var q = function(s){ return encodeURIComponent(s); };
+  var searches = [];
+
+  searches.push({
+    label: "Google",
+    hint: "Exact name + street, in quotes",
+    url: "https://www.google.com/search?q=" + q('"' + name + '" "' + street.replace(/\.$/,"") + '" ' + city + " " + state)
+  });
+
+  searches.push({
+    label: "FastPeopleSearch",
+    hint: "Free, usually shows the unit right in the result",
+    url: "https://www.fastpeoplesearch.com/name/" + slugHyphen(name) + "_" + slugHyphen(city) + "-" + state.toLowerCase()
+  });
+
+  searches.push({
+    label: "TruePeopleSearch",
+    hint: "Free, lists current address with unit when it has one",
+    url: "https://www.truepeoplesearch.com/results?name=" + q(name) + "&citystatezip=" + q(city + ", " + state)
+  });
+
+  searches.push({
+    label: "Whitepages",
+    hint: "Name + town lookup",
+    url: "https://www.whitepages.com/name/" + slugCap(name) + "/" + slugCap(city) + "-" + state
+  });
+
+  var stateName = STATE_NAMES[state] || "";
+  if(stateName){
+    searches.push({
+      label: "Spokeo",
+      hint: "Name + town lookup",
+      url: "https://www.spokeo.com/" + slugCap(name) + "/" + slugCap(stateName) + "/" + slugCap(city)
+    });
+  }
+
+  searches.push({
+    label: "Google: name + ZIP",
+    hint: "Sometimes the ZIP version surfaces broker pages the street version misses",
+    url: "https://www.google.com/search?q=" + q('"' + name + '" ' + zip + " apartment OR apt OR unit")
+  });
+
+  box.innerHTML = "";
+  searches.forEach(function(s){
+    var b = document.createElement("button");
+    b.className = "search-btn";
+    b.innerHTML = "";
+    b.appendChild(document.createTextNode("🔍 " + s.label));
+    var small = document.createElement("small");
+    small.textContent = s.hint;
+    b.appendChild(small);
+    b.addEventListener("click", function(){ window.open(s.url, "_blank"); });
+    box.appendChild(b);
+  });
+}
+
+["f-name","f-street","f-city","f-state","f-zip"].forEach(function(id){
+  $(id).addEventListener("input", buildSearches);
+});
+
+// ---------- Sample ----------
+$("sampleBtn").addEventListener("click", function(){
+  $("f-name").value = "Jordana Laskin";
+  $("f-street").value = "1741 Raleigh Court E.";
+  $("f-city").value = "Ocean";
+  $("f-state").value = "NJ";
+  $("f-zip").value = "07712";
+  buildSearches();
+  $("status").textContent = "Sample filled in. Tap a search below to see how it behaves.";
+});
+
+// ---------- Copy complete address ----------
+$("copyBtn").addEventListener("click", function(){
+  var name = $("f-name").value.trim();
+  var street = $("f-street").value.trim().replace(/\s+$/,"");
+  var unit = $("f-unit").value.trim();
+  var city = $("f-city").value.trim(), state = $("f-state").value.trim().toUpperCase(), zip = $("f-zip").value.trim();
+  if(!name || !street){ $("copyStatus").textContent = "Fill in the name and street first."; return; }
+  var streetOut = street.replace(/\.$/,"");
+  if(unit) streetOut += " Apt " + unit;
+  var full = name + "\n" + streetOut + "\n" + city + ", " + state + " " + zip;
+  function done(){ $("copyStatus").textContent = "Copied:\n" + full; }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(full).then(done, function(){ fallback(); });
+  } else { fallback(); }
+  function fallback(){
+    var ta = document.createElement("textarea");
+    ta.value = full; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch(e){ $("copyStatus").textContent = full; }
+    document.body.removeChild(ta);
+  }
+});
+
+// ---------- Photo + OCR ----------
+$("photoBtn").addEventListener("click", function(){ $("photo").click(); });
+
+$("photo").addEventListener("change", function(){
+  var file = this.files && this.files[0];
+  if(!file) return;
+  var prev = $("preview");
+  prev.src = URL.createObjectURL(file);
+  prev.style.display = "block";
+  $("status").textContent = "Reading the photo… 0%";
+  if(typeof Tesseract === "undefined"){
+    $("status").textContent = "The reading library did not load (needs a connection the first time). Check signal and reload, or type the address in below.";
+    return;
+  }
+  Tesseract.recognize(file, "eng", {
+    logger: function(msg){
+      if(msg.status === "recognizing text"){
+        $("status").textContent = "Reading the photo… " + Math.round(msg.progress * 100) + "%";
+      }
+    }
+  }).then(function(result){
+    var parsed = parseAddress(result.data.text);
+    if(parsed.name) $("f-name").value = parsed.name;
+    if(parsed.street) $("f-street").value = parsed.street;
+    if(parsed.city) $("f-city").value = parsed.city;
+    if(parsed.state) $("f-state").value = parsed.state;
+    if(parsed.zip) $("f-zip").value = parsed.zip;
+    if(parsed.zip4) $("zip4info").textContent = "Printed on the envelope: ZIP+4 " + parsed.zip4 + " (that's the building, not the unit).";
+    buildSearches();
+    if(parsed.name || parsed.street){
+      $("status").textContent = "Got it. Check the fields below, fix any slips, then tap a search.";
+    } else {
+      $("status").textContent = "Could not pull an address out of that photo. Try a closer, straighter shot of just the address block, or type it in below.";
+    }
+  }).catch(function(err){
+    $("status").textContent = "Reading failed. Try again, or type the address in below.";
+  });
+  this.value = "";
+});
+</script>
+</body>
+</html>
