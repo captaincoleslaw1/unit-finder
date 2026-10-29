@@ -105,7 +105,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v4</p>
+<p class="ver">Unit Finder v5</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -276,6 +276,25 @@ function parseAnchored(data){
   return out;
 }
 
+
+// ---------- Search helpers ----------
+function splitUnit(street){
+  var m = String(street).match(/^(.*?)\s+(Unit|Apt|Apartment|Ste|Suite|#)\s*([A-Za-z0-9][A-Za-z0-9-]*)\s*\.?\s*$/i);
+  if(!m) return { street: String(street).trim(), unit: "", label: "" };
+  var label = m[2].toLowerCase();
+  label = (label === "unit" || label === "#") ? "Unit" : (label === "ste" || label === "suite") ? "Suite" : "Apt";
+  return { street: m[1].trim(), unit: m[3], label: label };
+}
+function searchName(name){
+  var toks = String(name).trim().split(/\s+/).filter(Boolean);
+  if(toks.length < 3) return toks.join(" ");
+  var kept = toks.filter(function(t, i){
+    if(i === 0 || i === toks.length - 1) return true;
+    return !/^[A-Za-z]\.?$/.test(t); // drop middle initials, keep real middle names
+  });
+  return kept.join(" ");
+}
+
 // ---------- Search link building ----------
 function buildSearches(){
   var name = $("f-name").value.trim();
@@ -289,31 +308,41 @@ function buildSearches(){
     box.innerHTML = '<p class="note">Fill in at least the name and street above and the search buttons appear here, already filled in.</p>';
     return;
   }
+  var nameLoose = searchName(name);
+  var streetQ = splitUnit(street).street;
+  var surname = nameLoose.split(" ").slice(-1)[0];
+  var streetNameOnly = streetQ.replace(/^\d+\s+/,"").replace(/\s+(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\.?$/i,"").trim();
   var q = function(s){ return encodeURIComponent(s); };
   var searches = [];
 
   searches.push({
     label: "Google (start here)",
-    hint: "Exact name + street, in quotes",
-    url: "https://www.google.com/search?q=" + q('"' + name + '" "' + street.replace(/\.$/,"") + '" ' + city + " " + state)
+    hint: "No quotes on purpose: Google matches however the address happens to be written",
+    url: "https://www.google.com/search?q=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
+  });
+
+  searches.push({
+    label: "Google: exact name",
+    hint: "Name in quotes, town loose",
+    url: "https://www.google.com/search?q=" + q('"' + nameLoose + '" ' + citySearch + " " + state)
   });
 
   searches.push({
     label: "FastPeopleSearch",
     hint: "Free, usually shows the unit right in the result",
-    url: "https://www.fastpeoplesearch.com/name/" + slugHyphen(name) + "_" + slugHyphen(citySearch) + "-" + state.toLowerCase()
+    url: "https://www.fastpeoplesearch.com/name/" + slugHyphen(nameLoose) + "_" + slugHyphen(citySearch) + "-" + state.toLowerCase()
   });
 
   searches.push({
     label: "TruePeopleSearch",
     hint: "Free, lists current address with unit when it has one",
-    url: "https://www.truepeoplesearch.com/results?name=" + q(name) + "&citystatezip=" + q(citySearch + ", " + state)
+    url: "https://www.truepeoplesearch.com/results?name=" + q(nameLoose) + "&citystatezip=" + q(citySearch + ", " + state)
   });
 
   searches.push({
     label: "Whitepages",
     hint: "Name + town lookup",
-    url: "https://www.whitepages.com/name/" + slugCap(name) + "/" + slugCap(citySearch) + "-" + state
+    url: "https://www.whitepages.com/name/" + slugCap(nameLoose) + "/" + slugCap(citySearch) + "-" + state
   });
 
   var stateName = STATE_NAMES[state] || "";
@@ -321,21 +350,22 @@ function buildSearches(){
     searches.push({
       label: "Spokeo",
       hint: "Name + town lookup",
-      url: "https://www.spokeo.com/" + slugCap(name) + "/" + slugCap(stateName) + "/" + slugCap(citySearch)
+      url: "https://www.spokeo.com/" + slugCap(nameLoose) + "/" + slugCap(stateName) + "/" + slugCap(citySearch)
     });
   }
 
-  searches.push({
-    label: "Google: name + ZIP",
-    hint: "Sometimes the ZIP version surfaces broker pages the street version misses",
-    url: "https://www.google.com/search?q=" + q('"' + name + '" ' + zip + " apartment OR apt OR unit")
-  });
+  if(streetNameOnly){
+    searches.push({
+      label: "Google: last name + street",
+      hint: "Catches listings under a nickname or a different first name",
+      url: "https://www.google.com/search?q=" + q(surname + ' "' + streetNameOnly + '" ' + zip)
+    });
+  }
 
   box.innerHTML = "";
   searches.forEach(function(s, idx){
     var b = document.createElement("button");
     b.className = "search-btn" + (idx === 0 ? " primary" : "");
-    b.innerHTML = "";
     b.appendChild(document.createTextNode("🔍 " + s.label));
     var small = document.createElement("small");
     small.textContent = s.hint;
@@ -368,7 +398,7 @@ $("copyBtn").addEventListener("click", function(){
   var city = $("f-city").value.trim(), state = $("f-state").value.trim().toUpperCase(), zip = $("f-zip").value.trim();
   if(!name || !street){ $("copyStatus").textContent = "Fill in the name and street first."; return; }
   var streetOut = street.replace(/\.$/,"");
-  if(unit) streetOut += " Apt " + unit;
+  if(unit) streetOut += " " + ($("f-unit").dataset.label || "Apt") + " " + unit;
   var full = name + "\n" + streetOut + "\n" + city + ", " + state + " " + zip;
   function done(){ $("copyStatus").textContent = "Copied:\n" + full; }
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -423,11 +453,21 @@ function fillResult(best, bestScore){
     return;
   }
   if(best.name) $("f-name").value = best.name;
-  if(best.street && (STREET_SUFFIX.test(best.street) || bestScore >= 8)) $("f-street").value = best.street;
+  var foundUnit = null;
+  if(best.street && (STREET_SUFFIX.test(best.street) || bestScore >= 8)){
+    var parts = splitUnit(best.street);
+    $("f-street").value = parts.street;
+    if(parts.unit){
+      foundUnit = parts;
+      $("f-unit").value = parts.unit;
+      $("f-unit").dataset.label = parts.label;
+    }
+  }
   if(best.city) $("f-city").value = best.city;
   if(best.state) $("f-state").value = best.state;
   var notes = [];
-  if(best.zip4) notes.push("Printed on the piece: ZIP+4 " + best.zip4 + " (that is the building, not the unit).");
+  if(foundUnit) notes.push("Good news: this piece already shows the unit (" + foundUnit.label + " " + foundUnit.unit + "), filled in at the bottom. No search needed unless you want to double-check it.");
+  else if(best.zip4) notes.push("Printed on the piece: ZIP+4 " + best.zip4 + " (that is the building segment, not the unit).");
   if(best.sortZip && best.zip && best.sortZip !== best.zip){
     notes.push("The mailer printed ZIP " + best.zip + ", but its own sorting line says " + best.sortZip + ", so the searches use " + best.sortZip + ". Fix the ZIP field if you disagree.");
     $("f-zip").value = best.sortZip;
