@@ -108,7 +108,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v9</p>
+<p class="ver">Unit Finder v10</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -615,7 +615,7 @@ window.addEventListener("load", async function(){
 // A candidate only counts when the surname and the street (or full name)
 // appear in the same neighborhood of text, which filters out other
 // residents' units listed for the same building.
-var PEOPLE_DOMAINS = ["fastpeoplesearch.com","truepeoplesearch.com","spokeo.com","whitepages.com","unmask.com","thatsthem.com","beenverified.com","peoplefinders.com","nuwber.com","familytreenow.com","mylife.com","veripages.com","nationalpublicdata.com","reunion.com","usphonebook.com","searchpeoplefree.com","anywho.com","411.com"];
+var PEOPLE_DOMAINS = ["fastpeoplesearch.com","truepeoplesearch.com","spokeo.com","whitepages.com","unmask.com","thatsthem.com","beenverified.com","peoplefinders.com","nuwber.com","familytreenow.com","mylife.com","veripages.com","nationalpublicdata.com","reunion.com","usphonebook.com","searchpeoplefree.com","anywho.com","411.com","radaris.com","zabasearch.com","truthfinder.com","intelius.com","peoplelooker.com","instantcheckmate.com","socialcatfish.com","checkpeople.com","publicrecords.com","peoplefinders.com","smartbackgroundchecks.com","freepeopledirectory.com"];
 function escReM(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function cleanRelayText(t){
   return String(t)
@@ -630,7 +630,10 @@ function cleanRelayText(t){
     .replace(/\s+/g, " ");
 }
 function extractFromText(rawText, ctx, engineLabel){
-  var text = cleanRelayText(rawText);
+  var body = String(rawText);
+  var mc = body.indexOf("Markdown Content:");
+  if(mc >= 0) body = body.slice(mc + "Markdown Content:".length);
+  var text = cleanRelayText(body);
   var urlSpans = [], um, urlRe = /\(https?[^)]*\)/g;
   while((um = urlRe.exec(text)) !== null){ urlSpans.push([um.index, um.index + um[0].length]); }
   function inUrl(pos){ for(var i = 0; i < urlSpans.length; i++){ if(pos >= urlSpans[i][0] && pos <= urlSpans[i][1]) return true; } return false; }
@@ -648,17 +651,20 @@ function extractFromText(rawText, ctx, engineLabel){
     return lastPeople || (lastAny && lastAny !== "duckduckgo.com" && lastAny !== "bing.com" ? lastAny : "") || "search results";
   }
   var byUnit = {};
-  var unitRe = /\b(?:Apt|Apartment|Unit|Ste|Suite)\s*\.?\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b|#\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b/gi;
+  var unitRe = /\b(?:Apt|Apartment|Unit|Ste|Suite|Dept|Rm|Room|Bldg|Spc)\s*\.?\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b|#\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b/gi;
   var m;
   while((m = unitRe.exec(text)) !== null){
     var tok = (m[1] || m[2] || "").toUpperCase();
     if(!tok || !/\d/.test(tok)) continue;
     if(inUrl(m.index)) continue;
-    var win = text.slice(Math.max(0, m.index - 450), m.index + 220);
+    var win = text.slice(Math.max(0, m.index - 380), m.index + 90).replace(/\(https?[^)]*\)/g, " ").replace(/https?:\/\/\S+/g, " ");
     if(!new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(win)) continue;
     var hasStreet = ctx.streetCore ? new RegExp(escReM(ctx.streetCore), "i").test(win) : false;
+    var hasNumCity = ctx.streetNum && ctx.streetNum.length >= 3 && ctx.city
+      ? (new RegExp("\\b" + escReM(ctx.streetNum) + "\\b").test(win) && new RegExp(escReM(ctx.city), "i").test(win))
+      : false;
     var hasName = ctx.nameLoose ? new RegExp(escReM(ctx.nameLoose), "i").test(win) : false;
-    if(!(hasStreet || (hasName && !ctx.streetCore))) continue;
+    if(!(hasStreet || hasNumCity || (hasName && !ctx.streetCore))) continue;
     var dom = domainNear(m.index);
     if(!byUnit[tok]) byUnit[tok] = { unit: tok, score: 0, domains: {}, evidence: [] };
     var entry = byUnit[tok];
@@ -711,36 +717,58 @@ async function runMiner(){
   var streetQ = splitUnit(street).street;
   var surname = nameLoose.split(" ").slice(-1)[0];
   var streetCore = streetQ.replace(/^\s*\d+\s+/, "").replace(/\s+(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\.?$/i, "").trim();
-  var ctx = { surname: surname, nameLoose: nameLoose, streetCore: streetCore };
+  var streetNum = (streetQ.match(/^\s*(\d+)/) || [])[1] || "";
+  var citySearch = city.replace(/\s+Township$/i, "");
+  var ctx = { surname: surname, nameLoose: nameLoose, streetCore: streetCore, streetNum: streetNum, city: citySearch };
   var queries = [
+    streetNum ? (nameLoose + " " + streetNum + " " + city + " " + state) : (nameLoose + " " + streetQ + " " + city + " " + state),
     surname + ' "' + streetQ + '" unit',
     '"' + nameLoose + '" ' + city + " " + state
   ];
+  var ddgLite = false;
   var engines = [
-    { label: "DuckDuckGo", url: function(q){ return "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q); } },
+    { label: "DuckDuckGo", url: function(q){ return (ddgLite ? "https://lite.duckduckgo.com/lite/?q=" : "https://duckduckgo.com/?q=") + encodeURIComponent(q); } },
     { label: "Bing", url: function(q){ return "https://www.bing.com/search?q=" + encodeURIComponent(q); } }
   ];
+  function relayOk(txt){
+    return !!(txt && txt.length > 200 && !/"code":\s*(403|429)/.test(txt) && txt.indexOf("AbuseAlleviationError") < 0 && txt.indexOf("Rate limit") < 0);
+  }
+  function bestScoreNow(){
+    var bs = 0;
+    Object.keys(merged).forEach(function(k){ if(merged[k].score > bs) bs = merged[k].score; });
+    return bs;
+  }
   btn.disabled = true;
-  var merged = {}, gotAny = false, step = 0, total = queries.length * engines.length;
-  for(var ei = 0; ei < engines.length; ei++){
-    for(var qi = 0; qi < queries.length; qi++){
+  var merged = {}, answered = {}, step = 0, total = queries.length * engines.length;
+  outer:
+  for(var qi = 0; qi < queries.length; qi++){
+    for(var ei = 0; ei < engines.length; ei++){
       step++;
       st.textContent = "Reading " + engines[ei].label + " snippets… pass " + step + " of " + total + " (through a relay, a few seconds each)";
       var txt = await fetchTextM("https://r.jina.ai/" + engines[ei].url(queries[qi]), 22000);
-      if(txt && txt.length > 200){ gotAny = true; mergeCandidates(merged, extractFromText(txt, ctx, engines[ei].label)); }
+      if(relayOk(txt)){
+        answered[engines[ei].label] = true;
+        mergeCandidates(merged, extractFromText(txt, ctx, engines[ei].label));
+        if(bestScoreNow() >= 4) break outer;
+      } else if(engines[ei].label === "DuckDuckGo" && !ddgLite){
+        ddgLite = true; // main DDG route blocked at the relay; lite subdomain is a different door
+        ei--;
+      }
     }
   }
   btn.disabled = false;
-  if(!gotAny){
-    st.textContent = "The snippet relay did not answer this time. The buttons below still work the regular way.";
+  var answeredList = Object.keys(answered);
+  if(!answeredList.length){
+    st.textContent = "The snippet relay did not answer this time (it rate-limits when busy). Give it a minute, or work the buttons below.";
     return;
   }
+  var checkedNote = " Checked: " + answeredList.join(" and ") + ".";
   var rawCands = Object.keys(merged).map(function(k){ return merged[k]; }).sort(function(a,b){ return b.score - a.score; });
   var cands = rawCands.filter(function(c){ return c.score >= 2; });
   if(!cands.length){
     st.textContent = rawCands.length
-      ? "Only faint single mentions turned up for " + nameLoose + " at " + streetQ + ", not enough to suggest in good faith. Work the buttons below."
-      : "No unit turned up in the snippets for " + nameLoose + " at " + streetQ + ". That happens a lot; work the buttons below.";
+      ? "Only faint single mentions turned up for " + nameLoose + " at " + streetQ + ", not enough to suggest in good faith. Work the buttons below." + checkedNote
+      : "No unit turned up in the snippets for " + nameLoose + " at " + streetQ + ". That happens a lot; work the buttons below." + checkedNote;
     return;
   }
   var top = cands[0];
