@@ -38,7 +38,7 @@
   .search-btn.primary small { color: #d7e5ff; }
   .search-btn.done { opacity: .45; }
   .ver { text-align: center; color: #9aa7ba; font-size: 12px; margin: 18px 0 6px; }
-  img#preview { width: 100%; max-height: 150px; object-fit: cover; border-radius: 10px; margin-top: 10px; display: none; }
+  img#preview { width: 100%; max-height: 110px; object-fit: cover; border-radius: 10px; margin-top: 10px; display: none; }
 </style>
 </head>
 <body>
@@ -61,12 +61,20 @@
   <input type="file" id="photo" accept="image/*" style="display:none">
   <button class="ghost" id="photoBtn">Use a photo from the library instead</button>
   <img id="preview" alt="">
-  <div id="status">Or just type the name and address below.</div>
+  <div id="status">Or just type the name and address in section 3.</div>
   <div id="zip4info"></div>
 </div>
 
 <div class="card">
-  <h2>2. Check the fields (fix any reading slips)</h2>
+  <h2>2. Search for the missing unit</h2>
+  <div id="searches">
+    <p class="note">The search buttons appear here once a scan fills the fields below, already filled in. No typing on the route.</p>
+  </div>
+  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit. Buttons dim once tapped, so you can keep your place working down the list.</p>
+</div>
+
+<div class="card">
+  <h2>3. Check the fields (fix any reading slips)</h2>
   <label for="f-name">Name</label>
   <input id="f-name" autocomplete="off" placeholder="Jane Doe">
   <label for="f-street">Street address (no unit)</label>
@@ -89,14 +97,6 @@
 </div>
 
 <div class="card">
-  <h2>3. Search for the missing unit</h2>
-  <div id="searches">
-    <p class="note">Fill in the fields above and the search buttons appear here, already filled in. No typing on the route.</p>
-  </div>
-  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit. Buttons dim once tapped, so you can keep your place working down the list.</p>
-</div>
-
-<div class="card">
   <h2>4. Found it?</h2>
   <label for="f-unit">Apartment / unit number</label>
   <input id="f-unit" autocomplete="off" placeholder="120B">
@@ -105,7 +105,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">Unit Finder v7</p>
+<p class="ver">Unit Finder v8</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -311,7 +311,7 @@ function buildSearches(){
   var citySearch = city.replace(/\s+Township$/i,"");
   var box = $("searches");
   if(!name || !street){
-    box.innerHTML = '<p class="note">Fill in at least the name and street above and the search buttons appear here, already filled in.</p>';
+    box.innerHTML = '<p class="note">Once the name and street are in the fields below, the search buttons appear here, already filled in.</p>';
     return;
   }
   var nameLoose = searchName(name);
@@ -323,13 +323,13 @@ function buildSearches(){
 
   searches.push({
     label: "Web search (start here)",
-    hint: "DuckDuckGo, opens right here in Safari. No quotes on purpose: matches however the address is written",
-    url: "https://duckduckgo.com/?q=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
+    hint: "Google results through Startpage, so it stays in Safari. No quotes on purpose: matches however the address is written",
+    url: "https://www.startpage.com/sp/search?query=" + q(nameLoose + " " + streetQ + " " + city + " " + state)
   });
 
   searches.push({
     label: "Web search: exact name",
-    hint: "DuckDuckGo with the name in quotes, town loose",
+    hint: "DuckDuckGo backup, name in quotes, town loose",
     url: "https://duckduckgo.com/?q=" + q('"' + nameLoose + '" ' + citySearch + " " + state)
   });
 
