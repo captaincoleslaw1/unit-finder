@@ -116,7 +116,7 @@
 </div>
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="ver">IA Finder v13</p>
+<p class="ver">IA Finder v14</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -754,24 +754,33 @@ async function runMiner(){
   var prog = $("mineProg"), progFill = $("mineProgFill");
   if(prog) prog.style.display = "block";
   if(progFill) progFill.style.width = "0%";
-  var merged = {}, answered = {}, step = 0, total = queries.length * engines.length;
-  outer:
-  for(var qi = 0; qi < queries.length; qi++){
-    for(var ei = 0; ei < engines.length; ei++){
-      step++;
-      st.textContent = "Reading " + engines[ei].label + " snippets… pass " + step + " of " + total + " (through a relay, a few seconds each)";
-      if(progFill) progFill.style.width = Math.round(step / total * 100) + "%";
-      var txt = await fetchTextM("https://r.jina.ai/" + engines[ei].url(queries[qi]), 22000);
-      if(relayOk(txt)){
-        answered[engines[ei].label] = true;
-        mergeCandidates(merged, extractFromText(txt, ctx, engines[ei].label));
-        if(bestScoreNow() >= 4) break outer;
-      } else if(engines[ei].label === "DuckDuckGo" && !ddgLite){
-        ddgLite = true; // main DDG route blocked at the relay; lite subdomain is a different door
-        ei--;
-      }
+  var merged = {}, answered = {}, settled = 0, totalPlanned = 6;
+  var passes = [
+    { q: queries[0], e: engines[0] }, { q: queries[0], e: engines[1] }, { q: queries[1], e: engines[0] },
+    { q: queries[1], e: engines[1] }, { q: queries[2], e: engines[0] }, { q: queries[2], e: engines[1] }
+  ];
+  async function runPass(p){
+    var txt = await fetchTextM("https://r.jina.ai/" + p.e.url(p.q), 12000);
+    settled++;
+    if(progFill) progFill.style.width = Math.min(96, Math.round(settled / totalPlanned * 100)) + "%";
+    if(relayOk(txt)){
+      answered[p.e.label] = true;
+      mergeCandidates(merged, extractFromText(txt, ctx, p.e.label));
+      return true;
     }
+    return false;
   }
+  st.textContent = "Reading snippets from DuckDuckGo and Bing at the same time…";
+  var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2])]);
+  var ddgFailed = !w1res[0] && !w1res[2];
+  if(ddgFailed && !ddgLite) ddgLite = true;
+  if(bestScoreNow() < 4){
+    st.textContent = "First round done. Digging deeper with the backup queries…";
+    var w2 = [runPass(passes[3]), runPass(passes[4]), runPass(passes[5])];
+    if(ddgFailed) w2.push(runPass(passes[0]));
+    await Promise.all(w2);
+  }
+  if(progFill) progFill.style.width = "100%";
   btn.disabled = false;
   st.classList.remove("working");
   if(prog) prog.style.display = "none";
