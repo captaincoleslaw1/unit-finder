@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v18</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v19</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -703,11 +703,11 @@ async function runMiner(){
   var streetCore = streetQ.replace(/^\s*\d+\s+/, "").replace(/\s+(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\.?$/i, "").trim();
   var streetNum = (streetQ.match(/^\s*(\d+)/) || [])[1] || "";
   var citySearch = city.replace(/\s+Township$/i, "");
-  var ctx = { surname: surname, nameLoose: nameLoose, streetCore: streetCore, streetNum: streetNum, city: citySearch };
+  var ctx = { surname: surname, nameLoose: nameLoose, streetCore: streetCore, streetNum: streetNum, city: citySearch }; var zip = $("f-zip").value.trim();
   var queries = [
-    streetNum ? (nameLoose + " " + streetNum + " " + city + " " + state) : (nameLoose + " " + streetQ + " " + city + " " + state),
-    surname + ' "' + streetQ + '" unit',
-    '"' + nameLoose + '" ' + city + " " + state
+    (nameLoose + " " + streetQ.replace(/\s+(Road|Street|Avenue|Lane|Drive|Court|Boulevard|Parkway|Circle|Place)\.?$/i, function(m, s){ return " " + ({road:"Rd",street:"St",avenue:"Ave",lane:"Ln",drive:"Dr",court:"Ct",boulevard:"Blvd",parkway:"Pkwy",circle:"Cir",place:"Pl"})[s.toLowerCase()]; }) + " " + city + " " + state + " " + zip).replace(/\s+/g, " ").trim(),
+    (nameLoose + " " + streetQ.replace(/\s+(Road|Street|Avenue|Lane|Drive|Court|Boulevard|Parkway|Circle|Place)\.?$/i, function(m, s){ return " " + ({road:"Rd",street:"St",avenue:"Ave",lane:"Ln",drive:"Dr",court:"Ct",boulevard:"Blvd",parkway:"Pkwy",circle:"Cir",place:"Pl"})[s.toLowerCase()]; }) + " " + zip).replace(/\s+/g, " ").trim(),
+    (surname + " " + streetNum + " " + streetCore + " unit " + zip).replace(/\s+/g, " ").trim(), streetNum ? (nameLoose + " " + streetNum + " " + city + " " + state) : (nameLoose + " " + streetQ + " " + city + " " + state)
   ];
   var ddgLite = false;
   var engines = [
@@ -727,10 +727,10 @@ async function runMiner(){
   var prog = $("mineProg"), progFill = $("mineProgFill");
   if(prog) prog.style.display = "block";
   if(progFill) progFill.style.width = "0%";
-  var merged = {}, answered = {}, settled = 0, totalPlanned = 6;
+  var merged = {}, answered = {}, settled = 0, totalPlanned = 8;
   var passes = [
-    { q: queries[0], e: engines[0] }, { q: queries[0], e: engines[1] }, { q: queries[1], e: engines[0] },
-    { q: queries[1], e: engines[1] }, { q: queries[2], e: engines[0] }, { q: queries[2], e: engines[1] }
+    { q: queries[0], e: engines[0] }, { q: queries[0], e: engines[1] }, { q: queries[1], e: engines[0] }, { q: queries[1], e: engines[1] },
+    { q: queries[2], e: engines[0] }, { q: queries[2], e: engines[1] }, { q: queries[3], e: engines[0] }, { q: queries[3], e: engines[1] }
   ];
   async function runPass(p){
     var txt = await fetchTextM("https://r.jina.ai/" + p.e.url(p.q), 12000);
@@ -744,12 +744,12 @@ async function runMiner(){
     return false;
   }
   st.textContent = "Reading snippets from DuckDuckGo and Bing at the same time…";
-  var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2])]);
+  var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2]), runPass(passes[3])]);
   var ddgFailed = !w1res[0] && !w1res[2];
   if(ddgFailed && !ddgLite) ddgLite = true;
   if(bestScoreNow() < 4){
     st.textContent = "First round done. Digging deeper with the backup queries…";
-    var w2 = [runPass(passes[3]), runPass(passes[4]), runPass(passes[5])];
+    var w2 = [runPass(passes[4]), runPass(passes[5]), runPass(passes[6]), runPass(passes[7])];
     if(ddgFailed) w2.push(runPass(passes[0]));
     await Promise.all(w2);
   }
