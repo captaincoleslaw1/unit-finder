@@ -83,40 +83,34 @@
   <div id="mineResult"></div>
   <h2 style="margin-top:18px">Check the fields (fix any reading slips)</h2>
   <label for="f-name">Name</label>
-  <input id="f-name" autocomplete="off" placeholder="Jane Doe">
+  <input id="f-name" autocomplete="off">
   <label for="f-street">Street address (no unit)</label>
-  <input id="f-street" autocomplete="off" placeholder="1741 Raleigh Court E.">
+  <input id="f-street" autocomplete="off">
   <div class="row">
     <div>
       <label for="f-city">City</label>
-      <input id="f-city" autocomplete="off" placeholder="Ocean">
+      <input id="f-city" autocomplete="off">
     </div>
     <div style="flex:0 0 70px">
       <label for="f-state">State</label>
-      <input id="f-state" autocomplete="off" placeholder="NJ" maxlength="2">
+      <input id="f-state" autocomplete="off" maxlength="2">
     </div>
     <div style="flex:0 0 96px">
       <label for="f-zip">ZIP</label>
-      <input id="f-zip" autocomplete="off" inputmode="numeric" placeholder="07712" maxlength="10">
+      <input id="f-zip" autocomplete="off" inputmode="numeric" maxlength="10">
     </div>
   </div>
   <button class="ghost" id="sampleBtn">Fill in a sample to test the searches</button>
   <div id="searches">
-    <p class="note">The search buttons appear here once a scan fills the fields above, already filled in. No typing on the route.</p>
+    
   </div>
-  <p class="note" style="margin-top:12px">Some of these sites throw a "prove you're human" check or a block page. If one does, just try the next one. Broker info can be months out of date, so sanity-check a unit against the names on the boxes before you use it. A wrong unit is worse than no unit. Buttons dim once tapped, so you can keep your place working down the list.</p>
+  
 </div>
 
-<div class="section">
-  <h2>3. Found it?</h2>
-  <label for="f-unit">Apartment / unit number</label>
-  <input id="f-unit" autocomplete="off" placeholder="120B">
-  <button class="go" id="copyBtn">Copy Complete Address</button>
-  <div id="copyStatus" style="font-size:14px; margin-top:8px; color:#33415c"></div>
-</div>
+
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v17</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v18</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -404,37 +398,16 @@ function buildSearches(){
 
 // ---------- Sample ----------
 $("sampleBtn").addEventListener("click", function(){
-  $("f-name").value = "Jordana Laskin";
-  $("f-street").value = "1741 Raleigh Court E.";
-  $("f-city").value = "Ocean";
+  $("f-name").value = "Jane Doe";
+  $("f-street").value = "123 Main Street";
+  $("f-city").value = "Springfield";
   $("f-state").value = "NJ";
-  $("f-zip").value = "07712";
+  $("f-zip").value = "07081";
   buildSearches();
   $("status").classList.remove("working"); $("status").textContent = "Sample filled in. Tap a search below to see how it behaves.";
 });
 
-// ---------- Copy complete address ----------
-$("copyBtn").addEventListener("click", function(){
-  var name = $("f-name").value.trim();
-  var street = $("f-street").value.trim().replace(/\s+$/,"");
-  var unit = $("f-unit").value.trim();
-  var city = $("f-city").value.trim(), state = $("f-state").value.trim().toUpperCase(), zip = $("f-zip").value.trim();
-  if(!name || !street){ $("copyStatus").textContent = "Fill in the name and street first."; return; }
-  var streetOut = street.replace(/\.$/,"");
-  if(unit) streetOut += " " + ($("f-unit").dataset.label || "Apt") + " " + unit;
-  var full = name + "\n" + streetOut + "\n" + city + ", " + state + " " + zip;
-  function done(){ $("copyStatus").textContent = "Copied:\n" + full; }
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(full).then(done, function(){ fallback(); });
-  } else { fallback(); }
-  function fallback(){
-    var ta = document.createElement("textarea");
-    ta.value = full; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    try { document.execCommand("copy"); done(); } catch(e){ $("copyStatus").textContent = full; }
-    document.body.removeChild(ta);
-  }
-});
+
 
 // ---------- OCR engine: multi-pass, ZIP-anchor parse preferred, text parse as fallback ----------
 function loadImg(file){
@@ -482,14 +455,14 @@ function fillResult(best, bestScore){
     $("f-street").value = parts.street;
     if(parts.unit){
       foundUnit = parts;
-      $("f-unit").value = parts.unit;
-      $("f-unit").dataset.label = parts.label;
+      
+      
     }
   }
   if(best.city) $("f-city").value = best.city;
   if(best.state) $("f-state").value = best.state;
   var notes = [];
-  if(foundUnit) notes.push("Good news: this piece already shows the unit (" + foundUnit.label + " " + foundUnit.unit + "), filled in at the bottom. No search needed unless you want to double-check it.");
+  if(foundUnit) notes.push("Good news: this piece already shows the unit (" + foundUnit.label + " " + foundUnit.unit + "). No search needed unless you want to double-check it.");
   else if(best.zip4) notes.push("Printed on the piece: ZIP+4 " + best.zip4 + " (that is the building segment, not the unit).");
   if(best.sortZip && best.zip && best.sortZip !== best.zip){
     notes.push("The mailer printed ZIP " + best.zip + ", but its own sorting line says " + best.sortZip + ", so the searches use " + best.sortZip + ". Fix the ZIP field if you disagree.");
@@ -830,13 +803,7 @@ async function runMiner(){
   row.style.cssText = "display:flex; gap:8px; margin-top:10px";
   var acc = document.createElement("button");
   acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
-  acc.addEventListener("click", function(){
-    $("f-unit").value = top.unit;
-    $("f-unit").dataset.label = "Unit";
-    out.innerHTML = "";
-    st.textContent = "Unit " + top.unit + " filled in at the bottom. Hit Copy Complete Address when ready.";
-    $("copyBtn").scrollIntoView({ behavior: "smooth", block: "center" });
-  });
+  acc.addEventListener("click", function(){ var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); st.textContent = ""; });
   var dis = document.createElement("button");
   dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
   dis.addEventListener("click", function(){ out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
