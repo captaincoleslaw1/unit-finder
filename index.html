@@ -106,7 +106,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v27</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v28</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -623,7 +623,20 @@ function extractFromText(rawText, ctx, engineLabel){
     if(!tok || !/\d/.test(tok)) continue;
     if(inUrl(m.index)) continue;
     var win = text.slice(Math.max(0, m.index - 380), m.index + 90).replace(/\(https?[^)]*\)/g, " ").replace(/https?:\/\/\S+/g, " ");
-    if(!new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(win)) continue;
+    var segS = text.lastIndexOf(". ", m.index);
+    var segStart = (segS >= 0 && segS >= m.index - 220) ? segS + 2 : Math.max(0, m.index - 110);
+    var seg = text.slice(segStart, m.index + 160).replace(/\(https?[^)]*\)/g, " ");
+    if(!new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(win)){
+      // No name in range. Only an exact-address result may vouch for a unit:
+      // the unit's own segment must carry street number + street name + city
+      // together (the "Who Lives at 1750 Raleigh Ct E Apt 88A" shape). A unit
+      // tied to some other address (264 W 21st St) can never pass this way.
+      var anchNum = ctx.streetNum && ctx.streetNum.length >= 3
+        ? new RegExp("\\b" + escReM(ctx.streetNum) + "\\b").test(seg) : false;
+      var anchCore = ctx.streetCore ? new RegExp(escReM(ctx.streetCore), "i").test(seg) : false;
+      var anchCity = ctx.city ? new RegExp(escReM(ctx.city), "i").test(seg) : false;
+      if(!(anchNum && anchCore && anchCity)) continue;
+    }
     var hasStreet = ctx.streetCore ? new RegExp(escReM(ctx.streetCore), "i").test(win) : false;
     var hasNum = ctx.streetNum && ctx.streetNum.length >= 3
       ? new RegExp("\\b" + escReM(ctx.streetNum) + "\\b").test(win) : false;
@@ -631,9 +644,6 @@ function extractFromText(rawText, ctx, engineLabel){
       ? new RegExp(escReM(ctx.city), "i").test(win)
       : false;
     var hasName = ctx.nameLoose ? new RegExp(escReM(ctx.nameLoose), "i").test(win) : false;
-    var segS = text.lastIndexOf(". ", m.index);
-    var segStart = (segS >= 0 && segS >= m.index - 220) ? segS + 2 : Math.max(0, m.index - 110);
-    var seg = text.slice(segStart, m.index + 160).replace(/\(https?[^)]*\)/g, " ");
     var surnameSentence = new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(seg);
     if(!(hasStreet || hasNumCity || (hasName && surnameSentence && (hasNum || !ctx.streetCore)))) continue;
     var dom = domainNear(m.index);
@@ -718,11 +728,6 @@ async function runMiner(){
     { q: queries[2], label: "DuckDuckGo", path: "/ddg" }, { q: queries[2], label: "Bing", path: "/bing" },
     { q: queries[3], label: "DuckDuckGo", path: "/ddg" }, { q: queries[3], label: "Bing", path: "/bing" }
   ];
-  function resultsText(data){
-    var list = (data && (data.results || data.organic)) || null;
-    if(!list) return "";
-    return list.map(function(r){ return "(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""); }).join("\n");
-  }
   async function runPass(p){
     var useLite = p.path === "/ddg" && (ddgLite || p.lite);
     var rec = { engine: p.label + (useLite ? " (lite)" : ""), query: p.q, outcome: "", count: 0, best: 0 }; diag.push(rec);
@@ -736,7 +741,13 @@ async function runMiner(){
     var list = data && (data.results || data.organic);
     if(!list){ rec.outcome = data && data.error ? String(data.error).slice(0, 40) : "bad reply"; return false; }
     answered[p.label] = true; rec.outcome = "OK, " + list.length + " results" + (data.via ? " via " + data.via : "");
-    var pc = extractFromText(resultsText(data), ctx, p.label); rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc);
+    // Extract from each result separately, never from the joined page: on a
+    // joined page the surname/street window can bleed in from a neighboring
+    // result and "approve" a unit that belongs to a different address
+    // (the 264 W 21st St Apt 1 false positive, Nov 1, 2026).
+    var pc = {};
+    list.forEach(function(r){ mergeCandidates(pc, extractFromText("(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""), ctx, p.label)); });
+    rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc);
     return true;
   }
   async function runGooglePass(q){ return runPass({ q: q, label: "Google", path: "/search" }); }
