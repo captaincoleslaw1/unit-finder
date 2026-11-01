@@ -109,7 +109,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v23</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v24</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -579,7 +579,7 @@ window.addEventListener("load", async function(){
   } catch(e){}
 });
 // ---------- Snippet miner (prototype): suggests, never fills on its own ----------
-// Reads search-result pages through a reader relay and mines the snippets
+// Fetches search results through the Address Rescue server and mines the snippets
 // (titles + preview text) for unit numbers tied to the name + street.
 // A candidate only counts when the surname and the street (or full name)
 // appear in the same neighborhood of text, which filters out other
@@ -704,13 +704,7 @@ async function runMiner(){
     (surname + " " + streetNum + " " + streetCore + " unit " + zip).replace(/\s+/g, " ").trim(), streetNum ? (nameLoose + " " + streetNum + " " + city + " " + state) : (nameLoose + " " + streetQ + " " + city + " " + state)
   ];
   var ddgLite = false;
-  var engines = [
-    { label: "DuckDuckGo", url: function(q){ return (ddgLite ? "https://lite.duckduckgo.com/lite/?q=" : "https://duckduckgo.com/?q=") + encodeURIComponent(q); } },
-    { label: "Bing", url: function(q){ return "https://www.bing.com/search?q=" + encodeURIComponent(q); } }
-  ];
-  function relayOk(txt){
-    return !!(txt && txt.length > 200 && !/"code":\s*(403|429)/.test(txt) && txt.indexOf("AbuseAlleviationError") < 0 && txt.indexOf("Rate limit") < 0);
-  }
+  var WORKER = "https://address-rescue-search.addressrescue.workers.dev";
   function bestScoreNow(){
     var bs = 0;
     Object.keys(merged).forEach(function(k){ if(merged[k].score > bs) bs = merged[k].score; });
@@ -723,40 +717,33 @@ async function runMiner(){
   if(progFill) progFill.style.width = "0%";
   var merged = {}, answered = {}, settled = 0, totalPlanned = 10; var diag = [], ddgAnswered = 0, ddgCands = 0;
   var passes = [
-    { q: queries[0], e: engines[0] }, { q: queries[0], e: engines[1] }, { q: queries[1], e: engines[0] }, { q: queries[1], e: engines[1] },
-    { q: queries[2], e: engines[0] }, { q: queries[2], e: engines[1] }, { q: queries[3], e: engines[0] }, { q: queries[3], e: engines[1] }
+    { q: queries[0], label: "DuckDuckGo", path: "/ddg" }, { q: queries[0], label: "Bing", path: "/bing" },
+    { q: queries[1], label: "DuckDuckGo", path: "/ddg" }, { q: queries[1], label: "Bing", path: "/bing" },
+    { q: queries[2], label: "DuckDuckGo", path: "/ddg" }, { q: queries[2], label: "Bing", path: "/bing" },
+    { q: queries[3], label: "DuckDuckGo", path: "/ddg" }, { q: queries[3], label: "Bing", path: "/bing" }
   ];
-  async function runPass(p){ var isLitePass = !!(p.e.lite || (p.e.label === "DuckDuckGo" && ddgLite)); var rec = { engine: p.e.label + (isLitePass ? " (lite)" : ""), query: p.q, outcome: "", count: 0, best: 0 }; diag.push(rec);
-    var res = await fetchTextM("https://r.jina.ai/" + p.e.url(p.q), 12000); var txt = res.text;
-    settled++;
-    if(progFill) progFill.style.width = Math.min(96, Math.round(settled / totalPlanned * 100)) + "%";
-    if(res.status >= 400){ rec.outcome = "HTTP " + res.status; } else if(res.timedOut){ rec.outcome = "timeout"; } else if(!txt){ rec.outcome = "empty"; } else if(!relayOk(txt)){ rec.outcome = "relay error page"; } else if(relayOk(txt)){
-      answered[p.e.label] = true; rec.outcome = "OK, ~" + Math.round(txt.length / 1024) + " KB";
-      var pc = extractFromText(txt, ctx, p.e.label); rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.e.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc);
-      return true;
-    }
-    return false;
+  function resultsText(data){
+    var list = (data && (data.results || data.organic)) || null;
+    if(!list) return "";
+    return list.map(function(r){ return "(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""); }).join("\n");
   }
-  var GOOGLE_ENDPOINT = "https://address-rescue-search.addressrescue.workers.dev/search";
-  function serperText(data){
-    if(!data || !data.organic) return "";
-    return data.organic.map(function(r){ return "(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""); }).join("\n");
-  }
-  async function runGooglePass(q){
-    var rec = { engine: "Google", query: q, outcome: "", count: 0, best: 0 }; diag.push(rec);
-    if(GOOGLE_ENDPOINT.indexOf("REPLACE-ME") >= 0){ rec.outcome = "not set up yet"; return false; }
-    var res = await fetchTextM(GOOGLE_ENDPOINT + "?q=" + encodeURIComponent(q), 12000); var txt = res.text;
+  async function runPass(p){
+    var useLite = p.path === "/ddg" && (ddgLite || p.lite);
+    var rec = { engine: p.label + (useLite ? " (lite)" : ""), query: p.q, outcome: "", count: 0, best: 0 }; diag.push(rec);
+    var res = await fetchTextM(WORKER + p.path + "?q=" + encodeURIComponent(p.q) + (useLite ? "&lite=1" : ""), 12000); var txt = res.text;
     settled++;
     if(progFill) progFill.style.width = Math.min(96, Math.round(settled / totalPlanned * 100)) + "%";
     if(res.status >= 400){ rec.outcome = "HTTP " + res.status; return false; }
     if(res.timedOut){ rec.outcome = "timeout"; return false; }
     var data = null;
     try { data = JSON.parse(txt); } catch(e){}
-    if(!data || !data.organic){ rec.outcome = data && data.error ? String(data.error).slice(0, 40) : "bad reply"; return false; }
-    answered["Google"] = true; rec.outcome = "OK, " + data.organic.length + " results";
-    var pc = extractFromText(serperText(data), ctx, "Google"); rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); mergeCandidates(merged, pc);
+    var list = data && (data.results || data.organic);
+    if(!list){ rec.outcome = data && data.error ? String(data.error).slice(0, 40) : "bad reply"; return false; }
+    answered[p.label] = true; rec.outcome = "OK, " + list.length + " results" + (data.via ? " via " + data.via : "");
+    var pc = extractFromText(resultsText(data), ctx, p.label); rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc);
     return true;
   }
+  async function runGooglePass(q){ return runPass({ q: q, label: "Google", path: "/search" }); }
   function renderFinderDetails(summaryText){ var box = $("finderDetails"); if(!box) return; box.innerHTML = ""; var det = document.createElement("details"); det.className = "finder-details"; var sm = document.createElement("summary"); sm.textContent = "Finder details"; det.appendChild(sm); diag.forEach(function(d){ var ln = document.createElement("div"); ln.textContent = d.engine + " - \"" + d.query + "\" - " + d.outcome + " - " + (d.count ? d.count + " candidate" + (d.count === 1 ? "" : "s") + ", best score " + d.best : "no candidates"); det.appendChild(ln); }); var sl = document.createElement("div"); sl.textContent = summaryText; det.appendChild(sl); box.appendChild(det); } async function runAllPasses(){
     ddgAnswered = 0; ddgCands = 0; settled = 0;
   st.textContent = "Reading snippets from Google, DuckDuckGo, and Bing at the same time…";
@@ -769,7 +756,7 @@ async function runMiner(){
       if(ddgFailed) w2.push(runPass(passes[0]));
       await Promise.all(w2);
     }
-    if(bestScoreNow() < 2 && ddgAnswered > 0 && ddgCands === 0){ st.textContent = "DuckDuckGo answered but gave no candidates. Trying its lite pages once more…"; var liteEngine = { label: "DuckDuckGo", lite: true, url: function(q){ return "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q); } }; await Promise.all([runPass({ q: queries[0], e: liteEngine }), runPass({ q: queries[1], e: liteEngine })]); } if(progFill) progFill.style.width = "100%";
+    if(bestScoreNow() < 2 && ddgAnswered > 0 && ddgCands === 0){ st.textContent = "DuckDuckGo answered but gave no candidates. Trying its lite pages once more…"; await Promise.all([runPass({ q: queries[0], label: "DuckDuckGo", path: "/ddg", lite: true }), runPass({ q: queries[1], label: "DuckDuckGo", path: "/ddg", lite: true })]); } if(progFill) progFill.style.width = "100%";
     btn.disabled = false;
     st.classList.remove("working");
     if(prog) prog.style.display = "none";
@@ -778,10 +765,10 @@ async function runMiner(){
     await runAllPasses();
     if(Object.keys(answered).length) break;
     if(attempt === 0){
-      diag.push({ engine: "Relay", query: "no engine answered - automatic retry after a 10 second wait", outcome: "retrying", count: 0, best: 0 });
+      diag.push({ engine: "All engines", query: "no engine answered - automatic retry after a 10 second wait", outcome: "retrying", count: 0, best: 0 });
       if(progFill) progFill.style.width = "0%";
       for(var cd = 10; cd > 0; cd--){
-        st.textContent = "The relay is busy right now. Trying the whole search again on its own in " + cd + " seconds…";
+        st.textContent = "No search engine answered. Trying the whole search again on its own in " + cd + " seconds…";
         await new Promise(function(r){ setTimeout(r, 1000); });
       }
     }
@@ -791,7 +778,7 @@ async function runMiner(){
   if(prog) prog.style.display = "none";
   var answeredList = Object.keys(answered);
   if(!answeredList.length){
-    st.textContent = "The snippet relay did not answer, even after an automatic second try (it rate-limits when busy). Give it a few minutes, or work the buttons below."; renderFinderDetails("No candidate reached score 2.");
+    st.textContent = "None of the search engines answered, even after an automatic second try. Give it a few minutes, or work the buttons below."; renderFinderDetails("No candidate reached score 2.");
     return;
   }
   var checkedNote = " Checked: " + answeredList.join(" and ") + ".";
