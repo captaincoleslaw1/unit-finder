@@ -76,7 +76,7 @@
       <input id="f-zip" autocomplete="off" inputmode="numeric" maxlength="10">
     </div>
   </div>
-  <button class="big" id="mineBtn">Find completed address</button>
+  <button class="big" id="mineBtn" style="margin-top:16px">Find completed address</button>
   <div id="mineStatus" class="note" style="margin-top:8px"></div>
   <div id="mineProg"><div id="mineProgFill"></div></div>
   <div id="mineResult"></div><div id="finderDetails"></div>
@@ -107,7 +107,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v25</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v26</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -573,16 +573,8 @@ $("captureBtn").addEventListener("click", async function(){
   ocrSource(c, c.width, c.height, true);
 });
 
-// If camera permission was already granted to this site, open the viewfinder on load.
-// (Browsers will not let a page force the camera on with no tap and no prior permission.)
-window.addEventListener("load", async function(){
-  try {
-    if(navigator.permissions && navigator.permissions.query){
-      var st = await navigator.permissions.query({ name: "camera" });
-      if(st.state === "granted") startCam(true);
-    }
-  } catch(e){}
-});
+// The camera only ever opens when the user taps Open Camera. Never on load,
+// even when permission was granted before (Thomas's rule, Nov 1, 2026).
 // ---------- Snippet miner (prototype): suggests, never fills on its own ----------
 // Fetches search results through the Address Rescue server and mines the snippets
 // (titles + preview text) for unit numbers tied to the name + street.
