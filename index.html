@@ -54,34 +54,10 @@
 </head>
 <body>
 
-<header class="logo-header"><h1><img src="logo.jpg" alt="Address Rescue" style="width:100%; max-width:380px; height:auto; display:block; margin:0 auto;"></h1><p class="tagline">To find a completed address, scan or enter the address below.</p></header>
+<header class="logo-header"><h1><img src="logo.jpg" alt="Address Rescue" style="width:100%; max-width:380px; height:auto; display:block; margin:0 auto;"></h1></header>
 
 <div class="section">
-  <h2>1. Scan the address block</h2>
-  <p class="note" style="margin:0 0 8px">Line up <b>just the address block</b> in the yellow box.</p>
-  <div id="camWrap" style="display:none">
-    <div class="videobox">
-      <video id="cam" playsinline muted style="width:100%; border-radius:10px; background:#000; display:block"></video>
-      <div id="guide"></div>
-      <button class="closeCam" id="stopCamBtn">Close</button>
-    </div>
-    <button class="big" id="captureBtn" style="margin-top:8px">Capture Address</button>
-  </div>
-  <button class="big" id="liveBtn">Open Camera</button>
-  <input type="file" id="photo" accept="image/*" style="display:none">
-  <button class="ghost" id="photoBtn">Use a photo from the library instead</button>
-  <img id="preview" alt="">
-  <div id="status">Or just type the name and address in the fields under the Find completed address button.</div>
-  <div id="zip4info"></div>
-</div>
-
-<div class="section">
-  <h2>2. Search for the missing unit</h2>
-  <button class="big" id="mineBtn">Find completed address</button>
-  <div id="mineStatus" class="note" style="margin-top:8px"></div>
-  <div id="mineProg"><div id="mineProgFill"></div></div>
-  <div id="mineResult"></div><div id="finderDetails"></div>
-  <h2 style="margin-top:18px">Check the fields (fix any reading slips)</h2>
+  <h2>To find a complete address, enter it below</h2>
   <label for="f-name">Name</label>
   <input id="f-name" autocomplete="off">
   <label for="f-street">Street address (no unit)</label>
@@ -100,16 +76,38 @@
       <input id="f-zip" autocomplete="off" inputmode="numeric" maxlength="10">
     </div>
   </div>
+  <button class="big" id="mineBtn">Find completed address</button>
+  <div id="mineStatus" class="note" style="margin-top:8px"></div>
+  <div id="mineProg"><div id="mineProgFill"></div></div>
+  <div id="mineResult"></div><div id="finderDetails"></div>
   <div id="searches">
     
   </div>
-  
+</div>
+
+<div class="section">
+  <h2>Or scan to read the address</h2>
+  <p class="note" style="margin:0 0 8px">Line up <b>just the address block</b> in the yellow box. The details land in the fields at the top, and the page jumps back up so you can check them.</p>
+  <div id="camWrap" style="display:none">
+    <div class="videobox">
+      <video id="cam" playsinline muted style="width:100%; border-radius:10px; background:#000; display:block"></video>
+      <div id="guide"></div>
+      <button class="closeCam" id="stopCamBtn">Close</button>
+    </div>
+    <button class="big" id="captureBtn" style="margin-top:8px">Capture Address</button>
+  </div>
+  <button class="big" id="liveBtn">Open Camera</button>
+  <input type="file" id="photo" accept="image/*" style="display:none">
+  <button class="ghost" id="photoBtn">Use a photo from the library instead</button>
+  <img id="preview" alt="">
+  <div id="status">When the read finishes, the fields at the top fill in and the page jumps back up so you can check them.</div>
+  <div id="zip4info"></div>
 </div>
 
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v24</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v25</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -433,7 +431,7 @@ function makeCanvas(source, sw, sh, y0, y1, mode){
 
 function fillResult(best, bestScore){
   if(!best || bestScore <= 0){
-    $("status").classList.remove("working"); $("status").textContent = "Could not read that one at all. Retake it closer, with just the address block in the frame, or type it in below.";
+    $("status").classList.remove("working"); $("status").textContent = "Could not read that one at all. Retake it closer, with just the address block in the frame, or type it in at the top.";
     return;
   }
   if(best.name) $("f-name").value = best.name;
@@ -461,10 +459,17 @@ function fillResult(best, bestScore){
   $("zip4info").textContent = notes.join(" ");
   buildSearches();
   if(bestScore >= 13){
-    $("status").classList.remove("working"); $("status").textContent = "Got it. Check the fields below, fix any slips, then tap a search.";
+    $("status").classList.remove("working"); $("status").textContent = "Got it. The fields at the top are filled in.";
   } else {
     $("status").classList.remove("working"); $("status").textContent = "That read is shaky, so double-check every field. A closer shot of just the address block reads much better.";
   }
+  var summary;
+  if(notes.length) summary = notes.join(" ");
+  else if(bestScore >= 13) summary = "Scan read into the fields above. Check them, then tap Find completed address.";
+  else summary = "That scan read is shaky, so double-check every field above before you search.";
+  if(bestScore < 13 && notes.length) summary = "Shaky read, so double-check every field. " + summary;
+  var ms = $("mineStatus"); if(ms) ms.textContent = summary;
+  setTimeout(function(){ var fn = $("f-name"); if(fn) fn.scrollIntoView({ behavior: "smooth", block: "center" }); }, 900);
 }
 
 async function ocrSource(source, sw, sh, tight){
@@ -688,7 +693,7 @@ async function runMiner(){
   var btn = $("mineBtn"), st = $("mineStatus"), out = $("mineResult");
   out.innerHTML = "";
   if(!name || !street){
-    st.textContent = "Scan a letter or fill the name and street in the fields just below this button first, then I can go looking.";
+    st.textContent = "Enter the name and street in the fields above first, or scan a letter below, then I can go looking.";
     return;
   }
   var nameLoose = searchName(name);
