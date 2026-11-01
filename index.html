@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v20</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v21</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -743,23 +743,41 @@ async function runMiner(){
     }
     return false;
   }
-  function renderFinderDetails(summaryText){ var box = $("finderDetails"); if(!box) return; box.innerHTML = ""; var det = document.createElement("details"); det.className = "finder-details"; var sm = document.createElement("summary"); sm.textContent = "Finder details"; det.appendChild(sm); diag.forEach(function(d){ var ln = document.createElement("div"); ln.textContent = d.engine + " - \"" + d.query + "\" - " + d.outcome + " - " + (d.count ? d.count + " candidate" + (d.count === 1 ? "" : "s") + ", best score " + d.best : "no candidates"); det.appendChild(ln); }); var sl = document.createElement("div"); sl.textContent = summaryText; det.appendChild(sl); box.appendChild(det); } st.textContent = "Reading snippets from DuckDuckGo and Bing at the same time…";
-  var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2]), runPass(passes[3])]);
-  var ddgFailed = !w1res[0] && !w1res[2];
-  if(ddgFailed && !ddgLite) ddgLite = true;
-  if(bestScoreNow() < 4){
-    st.textContent = "First round done. Digging deeper with the backup queries…";
-    var w2 = [runPass(passes[4]), runPass(passes[5]), runPass(passes[6]), runPass(passes[7])];
-    if(ddgFailed) w2.push(runPass(passes[0]));
-    await Promise.all(w2);
+  function renderFinderDetails(summaryText){ var box = $("finderDetails"); if(!box) return; box.innerHTML = ""; var det = document.createElement("details"); det.className = "finder-details"; var sm = document.createElement("summary"); sm.textContent = "Finder details"; det.appendChild(sm); diag.forEach(function(d){ var ln = document.createElement("div"); ln.textContent = d.engine + " - \"" + d.query + "\" - " + d.outcome + " - " + (d.count ? d.count + " candidate" + (d.count === 1 ? "" : "s") + ", best score " + d.best : "no candidates"); det.appendChild(ln); }); var sl = document.createElement("div"); sl.textContent = summaryText; det.appendChild(sl); box.appendChild(det); } async function runAllPasses(){
+    ddgAnswered = 0; ddgCands = 0; settled = 0;
+  st.textContent = "Reading snippets from DuckDuckGo and Bing at the same time…";
+    var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2]), runPass(passes[3])]);
+    var ddgFailed = !w1res[0] && !w1res[2];
+    if(ddgFailed && !ddgLite) ddgLite = true;
+    if(bestScoreNow() < 4){
+      st.textContent = "First round done. Digging deeper with the backup queries…";
+      var w2 = [runPass(passes[4]), runPass(passes[5]), runPass(passes[6]), runPass(passes[7])];
+      if(ddgFailed) w2.push(runPass(passes[0]));
+      await Promise.all(w2);
+    }
+    if(bestScoreNow() < 2 && ddgAnswered > 0 && ddgCands === 0){ st.textContent = "DuckDuckGo answered but gave no candidates. Trying its lite pages once more…"; var liteEngine = { label: "DuckDuckGo", lite: true, url: function(q){ return "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q); } }; await Promise.all([runPass({ q: queries[0], e: liteEngine }), runPass({ q: queries[1], e: liteEngine })]); } if(progFill) progFill.style.width = "100%";
+    btn.disabled = false;
+    st.classList.remove("working");
+    if(prog) prog.style.display = "none";
   }
-  if(bestScoreNow() < 2 && ddgAnswered > 0 && ddgCands === 0){ st.textContent = "DuckDuckGo answered but gave no candidates. Trying its lite pages once more…"; var liteEngine = { label: "DuckDuckGo", lite: true, url: function(q){ return "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q); } }; await Promise.all([runPass({ q: queries[0], e: liteEngine }), runPass({ q: queries[1], e: liteEngine })]); } if(progFill) progFill.style.width = "100%";
+  for(var attempt = 0; attempt < 2; attempt++){
+    await runAllPasses();
+    if(Object.keys(answered).length) break;
+    if(attempt === 0){
+      diag.push({ engine: "Relay", query: "no engine answered - automatic retry after a 10 second wait", outcome: "retrying", count: 0, best: 0 });
+      if(progFill) progFill.style.width = "0%";
+      for(var cd = 10; cd > 0; cd--){
+        st.textContent = "The relay is busy right now. Trying the whole search again on its own in " + cd + " seconds…";
+        await new Promise(function(r){ setTimeout(r, 1000); });
+      }
+    }
+  }
   btn.disabled = false;
   st.classList.remove("working");
   if(prog) prog.style.display = "none";
   var answeredList = Object.keys(answered);
   if(!answeredList.length){
-    st.textContent = "The snippet relay did not answer this time (it rate-limits when busy). Give it a minute, or work the buttons below."; renderFinderDetails("No candidate reached score 2.");
+    st.textContent = "The snippet relay did not answer, even after an automatic second try (it rate-limits when busy). Give it a few minutes, or work the buttons below."; renderFinderDetails("No candidate reached score 2.");
     return;
   }
   var checkedNote = " Checked: " + answeredList.join(" and ") + ".";
