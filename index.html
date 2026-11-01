@@ -100,7 +100,6 @@
       <input id="f-zip" autocomplete="off" inputmode="numeric" maxlength="10">
     </div>
   </div>
-  <button class="ghost" id="sampleBtn">Fill in a sample to test the searches</button>
   <div id="searches">
     
   </div>
@@ -110,7 +109,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v22</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v23</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -394,17 +393,6 @@ function buildSearches(){
 
 ["f-name","f-street","f-city","f-state","f-zip"].forEach(function(id){
   $(id).addEventListener("input", buildSearches);
-});
-
-// ---------- Sample ----------
-$("sampleBtn").addEventListener("click", function(){
-  $("f-name").value = "Jane Doe";
-  $("f-street").value = "123 Main Street";
-  $("f-city").value = "Springfield";
-  $("f-state").value = "NJ";
-  $("f-zip").value = "07081";
-  buildSearches();
-  $("status").classList.remove("working"); $("status").textContent = "Sample filled in. Tap a search below to see how it behaves.";
 });
 
 
