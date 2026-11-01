@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v21</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v22</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -641,11 +641,17 @@ function extractFromText(rawText, ctx, engineLabel){
     var win = text.slice(Math.max(0, m.index - 380), m.index + 90).replace(/\(https?[^)]*\)/g, " ").replace(/https?:\/\/\S+/g, " ");
     if(!new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(win)) continue;
     var hasStreet = ctx.streetCore ? new RegExp(escReM(ctx.streetCore), "i").test(win) : false;
-    var hasNumCity = ctx.streetNum && ctx.streetNum.length >= 3 && ctx.city
-      ? (new RegExp("\\b" + escReM(ctx.streetNum) + "\\b").test(win) && new RegExp(escReM(ctx.city), "i").test(win))
+    var hasNum = ctx.streetNum && ctx.streetNum.length >= 3
+      ? new RegExp("\\b" + escReM(ctx.streetNum) + "\\b").test(win) : false;
+    var hasNumCity = hasNum && ctx.city
+      ? new RegExp(escReM(ctx.city), "i").test(win)
       : false;
     var hasName = ctx.nameLoose ? new RegExp(escReM(ctx.nameLoose), "i").test(win) : false;
-    if(!(hasStreet || hasNumCity || (hasName && !ctx.streetCore))) continue;
+    var segS = text.lastIndexOf(". ", m.index);
+    var segStart = (segS >= 0 && segS >= m.index - 220) ? segS + 2 : Math.max(0, m.index - 110);
+    var seg = text.slice(segStart, m.index + 160).replace(/\(https?[^)]*\)/g, " ");
+    var surnameSentence = new RegExp("\\b" + escReM(ctx.surname) + "\\b", "i").test(seg);
+    if(!(hasStreet || hasNumCity || (hasName && surnameSentence && (hasNum || !ctx.streetCore)))) continue;
     var dom = domainNear(m.index);
     if(!byUnit[tok]) byUnit[tok] = { unit: tok, score: 0, domains: {}, evidence: [] };
     var entry = byUnit[tok];
@@ -727,7 +733,7 @@ async function runMiner(){
   var prog = $("mineProg"), progFill = $("mineProgFill");
   if(prog) prog.style.display = "block";
   if(progFill) progFill.style.width = "0%";
-  var merged = {}, answered = {}, settled = 0, totalPlanned = 8; var diag = [], ddgAnswered = 0, ddgCands = 0;
+  var merged = {}, answered = {}, settled = 0, totalPlanned = 10; var diag = [], ddgAnswered = 0, ddgCands = 0;
   var passes = [
     { q: queries[0], e: engines[0] }, { q: queries[0], e: engines[1] }, { q: queries[1], e: engines[0] }, { q: queries[1], e: engines[1] },
     { q: queries[2], e: engines[0] }, { q: queries[2], e: engines[1] }, { q: queries[3], e: engines[0] }, { q: queries[3], e: engines[1] }
@@ -743,10 +749,30 @@ async function runMiner(){
     }
     return false;
   }
+  var GOOGLE_ENDPOINT = "https://address-rescue-search.addressrescue.workers.dev/search";
+  function serperText(data){
+    if(!data || !data.organic) return "";
+    return data.organic.map(function(r){ return "(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""); }).join("\n");
+  }
+  async function runGooglePass(q){
+    var rec = { engine: "Google", query: q, outcome: "", count: 0, best: 0 }; diag.push(rec);
+    if(GOOGLE_ENDPOINT.indexOf("REPLACE-ME") >= 0){ rec.outcome = "not set up yet"; return false; }
+    var res = await fetchTextM(GOOGLE_ENDPOINT + "?q=" + encodeURIComponent(q), 12000); var txt = res.text;
+    settled++;
+    if(progFill) progFill.style.width = Math.min(96, Math.round(settled / totalPlanned * 100)) + "%";
+    if(res.status >= 400){ rec.outcome = "HTTP " + res.status; return false; }
+    if(res.timedOut){ rec.outcome = "timeout"; return false; }
+    var data = null;
+    try { data = JSON.parse(txt); } catch(e){}
+    if(!data || !data.organic){ rec.outcome = data && data.error ? String(data.error).slice(0, 40) : "bad reply"; return false; }
+    answered["Google"] = true; rec.outcome = "OK, " + data.organic.length + " results";
+    var pc = extractFromText(serperText(data), ctx, "Google"); rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); mergeCandidates(merged, pc);
+    return true;
+  }
   function renderFinderDetails(summaryText){ var box = $("finderDetails"); if(!box) return; box.innerHTML = ""; var det = document.createElement("details"); det.className = "finder-details"; var sm = document.createElement("summary"); sm.textContent = "Finder details"; det.appendChild(sm); diag.forEach(function(d){ var ln = document.createElement("div"); ln.textContent = d.engine + " - \"" + d.query + "\" - " + d.outcome + " - " + (d.count ? d.count + " candidate" + (d.count === 1 ? "" : "s") + ", best score " + d.best : "no candidates"); det.appendChild(ln); }); var sl = document.createElement("div"); sl.textContent = summaryText; det.appendChild(sl); box.appendChild(det); } async function runAllPasses(){
     ddgAnswered = 0; ddgCands = 0; settled = 0;
-  st.textContent = "Reading snippets from DuckDuckGo and Bing at the same time…";
-    var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2]), runPass(passes[3])]);
+  st.textContent = "Reading snippets from Google, DuckDuckGo, and Bing at the same time…";
+    var w1res = await Promise.all([runPass(passes[0]), runPass(passes[1]), runPass(passes[2]), runPass(passes[3]), runGooglePass(queries[0]), runGooglePass(queries[3])]);
     var ddgFailed = !w1res[0] && !w1res[2];
     if(ddgFailed && !ddgLite) ddgLite = true;
     if(bestScoreNow() < 4){
