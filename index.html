@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v32</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v33</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -222,10 +222,98 @@ function parseAddress(text){
     var mm = lines[i].match(/^([A-Za-z][A-Za-z .]*?),?\s+([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
     if(mm){ cityIdx = i; m = mm; }
   }
+  if(m && !STATE_NAMES[m[2].toUpperCase()] && !/^(PR|VI|GU|AS|MP|AA|AE|AP|MH|FM|PW)$/.test(m[2].toUpperCase())) m = null; // state read wrong (MJ for NJ): let the salvage pass try
   if(m){
     out.city = cleanCity(m[1]);
     out.state = m[2].toUpperCase();
     out.zip = m[3];
+  }
+
+  // Salvage pass: the strict pattern above is all-or-nothing, and glare on a
+  // window envelope can wash out one digit of the ZIP and take the whole
+  // city/state/ZIP line down with it (the Caballero letter, Nov 3, 2026:
+  // name, street and unit read fine, town/state/ZIP all lost). When the
+  // strict pattern fails, recover whatever part of the line survived.
+  if(!m){
+    var isState = function(t){ var u = (t || "").toUpperCase(); return !!STATE_NAMES[u] || /^(PR|VI|GU|AS|MP|AA|AE|AP|MH|FM|PW)$/.test(u); };
+    var streetGuess = -1;
+    for(var sg = 0; sg < lines.length; sg++){ if(streetLineFix(lines[sg])){ streetGuess = sg; break; } }
+    var belowStreet = function(idx){ return streetGuess < 0 || idx > streetGuess; };
+    // A: a city/state/ZIP pattern riding at the end of a longer line (merged lines)
+    for(var a2 = lines.length - 1; a2 >= 0 && !m; a2--){
+      if(a2 !== streetGuess && !belowStreet(a2)) continue;
+      var tm = lines[a2].match(/([A-Za-z]+(?: [A-Za-z]+){0,2}),?\s+([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+      if(tm && isState(tm[2])){
+        var cityA = tm[1].trim().split(/\s+/);
+        var droppedUnit = "";
+        if(cityA.length > 1 && cityA[0].length === 1){ droppedUnit = cityA[0]; cityA.shift(); }
+        cityIdx = a2; out.city = cleanCity(cityA.join(" ")); out.state = tm[2].toUpperCase(); out.zip = tm[3]; m = tm;
+        if(a2 === streetGuess){
+          var headTxt = lines[a2].substring(0, tm.index).replace(/[,\s]+$/, "");
+          if(droppedUnit && /\b(Apt|Apartment|Unit|Ste|Suite|#)\.?$/i.test(headTxt)) headTxt += " " + droppedUnit;
+          var hf = headTxt ? streetLineFix(headTxt) : null;
+          if(hf) out.street = smartCase(hf.replace(/\s+/g, " "));
+        }
+      }
+    }
+    // B: a ZIP token survived even if a digit read as a letter
+    if(!m){
+      var zipTok = function(tok){
+        var t = tok.replace(/[.,]$/, "");
+        var z4 = t.match(/^(\d{5})-(\d{4})$/); if(z4) return z4[1];
+        if(/^\d{5}$/.test(t)) return t;
+        if(t.length === 5 && /[A-Za-z]/.test(t)){
+          var digs = 0, rep = "";
+          for(var ci = 0; ci < 5; ci++){
+            var ch = t[ci];
+            if(/\d/.test(ch)){ rep += ch; digs++; }
+            else if(NUM_CONFUSE[ch.toLowerCase()]){ rep += NUM_CONFUSE[ch.toLowerCase()]; }
+            else return null;
+          }
+          if(digs >= 4) return rep;
+        }
+        return null;
+      };
+      for(var b2 = lines.length - 1; b2 >= 0 && !m; b2--){
+        if(b2 === streetGuess) continue;
+        var toks = lines[b2].split(/\s+/).filter(Boolean);
+        for(var tk = toks.length - 1; tk >= 0; tk--){
+          var zv = zipTok(toks[tk]);
+          if(!zv) continue;
+          if(!belowStreet(b2)) break;
+          var before = toks.slice(0, tk);
+          var stName = "";
+          if(before.length >= 2 && before[before.length-1].length === 1 && before[before.length-2].length === 1 && isState(before[before.length-2] + before[before.length-1])){
+            stName = (before[before.length-2] + before[before.length-1]).toUpperCase(); before = before.slice(0, -2);
+          } else if(before.length >= 1 && isState(before[before.length-1].replace(/[.,]$/, ""))){
+            stName = before[before.length-1].replace(/[.,]$/, "").toUpperCase(); before = before.slice(0, -1);
+          } else if(before.length >= 1 && /^[A-Za-z]{2}[.,]?$/.test(before[before.length-1])){
+            before = before.slice(0, -1); // a state token that read wrong; drop it, keep the city words
+          }
+          var cityWords = before.filter(function(w){ return /[A-Za-z]/.test(w); });
+          if(!stName && !cityWords.length) break;
+          cityIdx = b2; out.zip = zv; out.state = stName;
+          if(cityWords.length) out.city = cleanCity(cityWords.join(" "));
+          m = true; break;
+        }
+      }
+    }
+    if(!m){
+      // C: a bare ZIP on the last line still fills the ZIP field
+      var lastL = lines.length - 1;
+      if(lastL >= 0){
+        var lz = lines[lastL].match(/^\s*(\d{5})(?:-\d{4})?\s*$/);
+        if(lz) out.zip = lz[1];
+      }
+      // D: a city + state line whose ZIP never read at all
+      for(var d2 = lines.length - 1; d2 >= 0; d2--){
+        if(d2 === streetGuess || !belowStreet(d2)) continue;
+        var dm = lines[d2].match(/^([A-Za-z][A-Za-z .]*?),?\s+([A-Za-z]{2})\s*$/);
+        if(dm && isState(dm[2])){
+          cityIdx = d2; out.city = cleanCity(dm[1]); out.state = dm[2].toUpperCase(); break;
+        }
+      }
+    }
   }
 
   var streetIdx = -1, streetFixed = "";
@@ -497,6 +585,7 @@ function makeCanvas(source, sw, sh, y0, y1, mode){
     for(i = 0; i < n; i++){
       v = (gray[i] - min) * 255 / range;
       if(mode === "binary") v = v > 150 ? 255 : 0;
+      else if(mode === "binaryHi") v = v > 205 ? 255 : 0;
       d[i*4] = v; d[i*4+1] = v; d[i*4+2] = v;
     }
     ctx.putImageData(im, 0, 0);
@@ -556,7 +645,7 @@ async function ocrSource(source, sw, sh, tight){
     try { await worker.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
   } catch(e){ worker = null; }
   var passes = tight
-    ? [[0, 1, "stretch"], [0, 1, "binary"]]
+    ? [[0, 1, "stretch"], [0, 1, "binary"], [0, 1, "binaryHi"]]
     : [[0, 1, "stretch"], [0, 0.55, "stretch"], [0.12, 0.7, "stretch"], [0, 1, "binary"]];
   var best = null, bestScore = -1;
   for(var k = 0; k < passes.length; k++){
