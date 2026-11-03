@@ -107,7 +107,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v30</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v31</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -137,9 +137,51 @@ function slugCap(s){
 // ---------- Address parsing from OCR text ----------
 var STREET_SUFFIX = /\b(St|Street|Ave|Avenue|Rd|Road|Ct|Court|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway|Trail|Trl|Sq|Square|Loop|Run|Row|Cove|Point|Pt)\b\.?/i;
 
+// OCR sometimes glues barcode/shadow fragments onto the front of a line
+// ("Br Lt TWNTON FALLS", "Pl MANUEL D ABREU"). A leading token of 2-3
+// letters with no vowel is junk, unless it is a real name/place start.
+var CITY_KEEP_FIRST = { st:1, mt:1, ft:1, el:1, la:1, le:1, los:1, las:1, san:1, del:1 };
+function dropJunkLead(tokens, keepSet){
+  while(tokens.length > 2){
+    var t = tokens[0].toLowerCase().replace(/[^a-z]/g,"");
+    if(t.length < 2 || t.length > 3 || /[aeiou]/.test(t)) break;
+    if(keepSet && keepSet[t]) break;
+    tokens.shift();
+  }
+  return tokens;
+}
+function cleanCity(raw){
+  var toks = String(raw).replace(/,+$/,"").trim().split(/\s+/).filter(Boolean);
+  toks = dropJunkLead(toks, CITY_KEEP_FIRST);
+  return smartCase(toks.join(" "));
+}
+// A street line whose house number OCR misread as letters ("g LISA DR",
+// "175O RALEIGH CT") still counts, with the number repaired from the
+// usual look-alike letters. Single letters only for the safest swaps.
+var NUM_CONFUSE = { i:"1", l:"1", "|":"1", "!":"1", o:"0", s:"5", z:"2", b:"8", g:"9", q:"9" };
+function streetLineFix(line){
+  var m = String(line).match(/^\s*(\S+)\s+(\S.*)$/);
+  if(!m) return null;
+  var tok = m[1], rest = m[2];
+  if(/^\d{1,6}$/.test(tok)) return String(line).trim();
+  if(!STREET_SUFFIX.test(line)) return null;
+  if(tok.length > 6 || !/^[A-Za-z0-9|!]+$/.test(tok) || !/[A-Za-z|!]/.test(tok)) return null;
+  if(tok.length === 1 && !/^[gqli]$/i.test(tok)) return null;
+  var num = "";
+  for(var i = 0; i < tok.length; i++){
+    var c = tok[i];
+    if(/\d/.test(c)){ num += c; continue; }
+    var r = NUM_CONFUSE[c.toLowerCase()];
+    if(!r) return null;
+    num += r;
+  }
+  return num + " " + rest;
+}
+
 function cleanName(l){
   var out = l.replace(/[^A-Za-z .'-]/g," ").replace(/\s+/g," ").trim();
   out = out.replace(/^\s*(Mr|Mrs|Ms|Miss|Dr)\.?\s+/i,"");
+  out = dropJunkLead(out.split(" ").filter(Boolean), null).join(" ");
   out = smartCase(out);
   out = out.replace(/^The\s+/i,"");
   out = out.replace(/\s+(Household|Family|Residence|Residents|Occupant)$/i,"");
@@ -178,25 +220,29 @@ function parseAddress(text){
     if(mm){ cityIdx = i; m = mm; }
   }
   if(m){
-    out.city = smartCase(m[1].replace(/,+$/,""));
+    out.city = cleanCity(m[1]);
     out.state = m[2].toUpperCase();
     out.zip = m[3];
   }
 
-  var streetIdx = -1;
+  var streetIdx = -1, streetFixed = "";
   // Anchored: street is one of the 3 lines directly above the city line
   if(cityIdx > 0){
     for(var a=cityIdx-1; a>=Math.max(0,cityIdx-3); a--){
-      if(/^\d{1,6}\s+\S+/.test(lines[a])){ streetIdx = a; break; }
+      var sfA = streetLineFix(lines[a]);
+      if(sfA){ streetIdx = a; streetFixed = sfA; break; }
     }
   }
   // Fallback: a number-led line that also carries a street suffix
   if(streetIdx < 0){
     for(var j=0;j<lines.length;j++){
-      if(j !== cityIdx && /^\d{1,6}\s+[A-Za-z]/.test(lines[j]) && STREET_SUFFIX.test(lines[j])){ streetIdx = j; break; }
+      if(j !== cityIdx && STREET_SUFFIX.test(lines[j])){
+        var sfF = streetLineFix(lines[j]);
+        if(sfF && /^\d{1,6}\s+[A-Za-z]/.test(sfF)){ streetIdx = j; streetFixed = sfF; break; }
+      }
     }
   }
-  if(streetIdx >= 0) out.street = smartCase(lines[streetIdx].replace(/\s+/g," "));
+  if(streetIdx >= 0) out.street = smartCase(streetFixed.replace(/\s+/g," "));
 
   // Name: a plausible line just above the street (or just above the city line)
   var anchor = (streetIdx >= 0 ? streetIdx : cityIdx);
@@ -249,7 +295,7 @@ function parseAnchored(data){
     }
   });
   if(!anchor) return null;
-  var out = { name: "", street: "", city: smartCase(anchorM[1].replace(/,+$/, "")), state: anchorM[2].toUpperCase(), zip: anchorM[3], zip4: "", sortZip: "" };
+  var out = { name: "", street: "", city: cleanCity(anchorM[1]), state: anchorM[2].toUpperCase(), zip: anchorM[3], zip4: "", sortZip: "" };
   var z4 = (data.text || "").match(/\b(\d{5})-(\d{4})\b/); if(z4) out.zip4 = z4[0];
   var sm = (data.text || "").match(/5[-\s]*DIGIT\s+(\d{5})/i); if(sm) out.sortZip = sm[1];
   var junk = /(first[\s-]*class|us postage|postage|pitney|indicia|presort|bulk rate|permit|return service|electronic service|current resident|www\.|http|\.com)/i;
@@ -264,7 +310,8 @@ function parseAnchored(data){
     if(CITYZIP.test(t)) break; // another block's city line: we have left the address block
     if(junk.test(t) || /5[-\s]*DIGIT/i.test(t) || !/[A-Za-z0-9]/.test(t)) continue;
     if(!out.street){
-      if(/^\d{1,6}\s+\S+/.test(t)){ out.street = smartCase(t.replace(/\s+/g, " ")); continue; }
+      var sfW = streetLineFix(t);
+      if(sfW){ out.street = smartCase(sfW.replace(/\s+/g, " ")); continue; }
       if(!pendingName && plausibleName(t)) pendingName = cleanName(t);
       continue;
     }
