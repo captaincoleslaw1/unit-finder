@@ -105,8 +105,8 @@
 
 
 
-<p class="note">Privacy: the photo is read right here on your phone. Nothing is uploaded or stored. The searches open on the sites themselves, same as typing them in by hand.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v28</p>
+<p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v29</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -686,6 +686,27 @@ function fetchTextM(url, ms){
     }).catch(function(){ clearTimeout(t); resolve({ text: "", status: 0, timedOut: fetchTimedOut }); });
   });
 }
+// ---------- Anonymous usage counts (no names or addresses, ever) ----------
+var STATS_ENDPOINT = "https://address-rescue-stats.addressrescue.workers.dev/event";
+function arVisitorId(){
+  try {
+    var id = localStorage.getItem("ar_vid");
+    if(!id){ id = "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12); localStorage.setItem("ar_vid", id); }
+    return id;
+  } catch(e){ return ""; }
+}
+function arStats(type){
+  try {
+    var payload = JSON.stringify({ type: type, v: arVisitorId() });
+    if(navigator.sendBeacon){
+      navigator.sendBeacon(STATS_ENDPOINT, new Blob([payload], { type: "text/plain;charset=UTF-8" }));
+    } else {
+      fetch(STATS_ENDPOINT, { method: "POST", body: payload, headers: { "Content-Type": "text/plain;charset=UTF-8" }, keepalive: true }).catch(function(){});
+    }
+  } catch(e){}
+}
+arStats("visit");
+
 async function runMiner(){
   var name = $("f-name").value.trim();
   var street = $("f-street").value.trim();
@@ -697,6 +718,7 @@ async function runMiner(){
     st.textContent = "Enter the name and street in the fields above first, or scan a letter below, then I can go looking.";
     return;
   }
+  arStats("inquiry");
   var nameLoose = searchName(name);
   var streetQ = splitUnit(street).street;
   var surname = nameLoose.split(" ").slice(-1)[0];
