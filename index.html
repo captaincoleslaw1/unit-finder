@@ -34,6 +34,7 @@
   .note { font-size: 13px; color: #5a6b84; line-height: 1.45; }
   #zip4info { font-size: 14px; color: #33415c; margin-top: 8px; }
   .videobox { position: relative; }
+  #camWrap { scroll-margin-top: 10px; }
   #guide { position: absolute; left: 4%; top: 9%; width: 92%; height: 52%; border: 3px solid #ffd60a; border-radius: 12px; background: rgba(255,214,10,.07); pointer-events: none; }
   #cam { height: 34vh; object-fit: cover; }
   .closeCam { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.55); color: #fff; padding: 6px 10px; font-size: 13px; border-radius: 9px; }
@@ -106,7 +107,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v29</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v30</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -535,6 +536,13 @@ async function startCam(auto){
     await v.play();
     $("camWrap").style.display = "block";
     $("liveBtn").style.display = "none";
+    // Bring the viewfinder to the user: the camera section sits below the
+    // manual form, so glide the page until the camera and its Capture
+    // button fill the screen. No manual scrolling to take the picture.
+    setTimeout(function(){
+      try { $("camWrap").scrollIntoView({ behavior: "smooth", block: "start" }); }
+      catch(e){ $("camWrap").scrollIntoView(); }
+    }, 60);
     return true;
   } catch(e){
     if(!auto) $("status").classList.remove("working"); $("status").textContent = "Camera was blocked. Allow camera access for this site in Safari settings, or use a library photo instead.";
