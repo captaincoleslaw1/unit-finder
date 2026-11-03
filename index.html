@@ -30,6 +30,8 @@
   .search-btn small { display: block; font-weight: 400; font-size: 13px; color: #5a6b84; margin-top: 2px; }
   .search-btn:active { background: #eef4ff; }
   .go { display: block; width: 100%; padding: 14px; margin-top: 12px; font-size: 17px; font-weight: 600; background: linear-gradient(180deg, #22c55e, #15803d); color: #fff; border-radius: 14px; box-shadow: 0 6px 14px rgba(21,128,61,.30); }
+  .newaddr { display: block; width: 100%; padding: 13px; margin-top: 14px; font-size: 16px; font-weight: 600; background: #fff; color: #0b3d91; border: 1.5px solid #0b5fff; border-radius: 13px; }
+  .newaddr:active { background: #eef4ff; }
   .ghost { display: block; width: 100%; padding: 11px; margin-top: 10px; font-size: 15px; font-weight: 600; background: none; color: #0b5fff; }
   .note { font-size: 13px; color: #5a6b84; line-height: 1.45; }
   #zip4info { font-size: 14px; color: #33415c; margin-top: 8px; }
@@ -81,6 +83,7 @@
   <div id="mineStatus" class="note" style="margin-top:8px"></div>
   <div id="mineProg"><div id="mineProgFill"></div></div>
   <div id="mineResult"></div><div id="finderDetails"></div>
+  <button class="newaddr" id="newBtn" style="display:none">Start a new address</button>
   <div id="searches">
     
   </div>
@@ -107,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v31</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v32</p>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
@@ -437,8 +440,33 @@ function buildSearches(){
 }
 
 ["f-name","f-street","f-city","f-state","f-zip"].forEach(function(id){
-  $(id).addEventListener("input", buildSearches);
+  $(id).addEventListener("input", function(){ buildSearches(); updateNewBtn(); });
 });
+
+// ---------- Start over: clear everything for the next address, no refresh ----------
+function updateNewBtn(){
+  var b = $("newBtn"); if(!b) return;
+  if($("mineBtn") && $("mineBtn").disabled){ b.style.display = "none"; return; }
+  var has = ["f-name","f-street","f-city","f-state","f-zip"].some(function(id){ return $(id).value.trim() !== ""; })
+    || $("mineResult").innerHTML.trim() !== "";
+  b.style.display = has ? "block" : "none";
+}
+function startNewAddress(){
+  ["f-name","f-street","f-city","f-state","f-zip"].forEach(function(id){ $(id).value = ""; });
+  var st = $("mineStatus"); st.classList.remove("working"); st.textContent = "";
+  var mp = $("mineProg"); if(mp) mp.style.display = "none";
+  var mf = $("mineProgFill"); if(mf) mf.style.width = "0";
+  $("mineResult").innerHTML = "";
+  $("finderDetails").innerHTML = "";
+  $("zip4info").textContent = "";
+  var sc = $("status"); if(sc){ sc.classList.remove("working"); sc.textContent = ""; }
+  var pv = $("preview"); if(pv){ pv.style.display = "none"; pv.removeAttribute("src"); }
+  if(stream) stopCam();
+  buildSearches();
+  updateNewBtn();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+$("newBtn").addEventListener("click", startNewAddress);
 
 
 
@@ -505,6 +533,7 @@ function fillResult(best, bestScore){
   }
   $("zip4info").textContent = notes.join(" ");
   buildSearches();
+  updateNewBtn();
   if(bestScore >= 13){
     $("status").classList.remove("working"); $("status").textContent = "Got it. The fields at the top are filled in.";
   } else {
@@ -771,6 +800,7 @@ async function runMiner(){
   out.innerHTML = "";
   if(!name || !street){
     st.textContent = "Enter the name and street in the fields above first, or scan a letter below, then I can go looking.";
+    updateNewBtn();
     return;
   }
   arStats("inquiry");
@@ -794,6 +824,7 @@ async function runMiner(){
     return bs;
   }
   btn.disabled = true;
+  updateNewBtn();
   st.classList.add("working");
   var prog = $("mineProg"), progFill = $("mineProgFill");
   if(prog) prog.style.display = "block";
@@ -863,6 +894,7 @@ async function runMiner(){
   var answeredList = Object.keys(answered);
   if(!answeredList.length){
     st.textContent = "None of the search engines answered, even after an automatic second try. Give it a few minutes, or work the buttons below."; renderFinderDetails("No candidate reached score 2.");
+    updateNewBtn();
     return;
   }
   var checkedNote = " Checked: " + answeredList.join(" and ") + ".";
@@ -872,6 +904,7 @@ async function runMiner(){
     st.textContent = rawCands.length
       ? "Only faint single mentions turned up for " + nameLoose + " at " + streetQ + ", not enough to suggest in good faith. Work the buttons below." + checkedNote
       : "No unit turned up in the snippets for " + nameLoose + " at " + streetQ + ". That happens a lot; work the buttons below." + checkedNote; renderFinderDetails("No candidate reached score 2.");
+    updateNewBtn();
     return;
   }
   var top = cands[0];
@@ -913,6 +946,7 @@ async function runMiner(){
   row.appendChild(acc); row.appendChild(dis);
   card.appendChild(row);
   out.appendChild(card); renderFinderDetails("Best: unit " + top.unit + ", score " + top.score);
+  updateNewBtn();
 }
 $("mineBtn").addEventListener("click", runMiner);
 </script>
