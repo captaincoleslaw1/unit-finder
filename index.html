@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v34</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v35</p>
 
 <link rel="preconnect" href="https://address-rescue-search.addressrescue.workers.dev">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -784,14 +784,31 @@ function cleanRelayText(t){
        return " " + txt + " (" + u + ") ";
     })
     .replace(/\*\*/g, " ")
-    .replace(/#{1,6}\s+/g, " ")
+    .replace(/(^|\n)#{1,6}\s+/g, " ") // markdown headers only at line starts, so a real "# 88A" unit survives
     .replace(/\s+/g, " ");
+}
+// Search snippets can arrive with HTML entities still in them (Bing especially).
+// Left alone, "&#32;" (a space) and "&#0183;" (a dot) hand the unit extractor
+// two fake units, "#32" and "#0183", which once outranked the real 88A on the
+// Carchi letter (Nov 7, 2026). Decode entities before anything reads the text.
+function decodeEntities(t){
+  return String(t || "")
+    .replace(/&#x([0-9a-fA-F]+);/g, function(m, h){ var c = parseInt(h, 16); return isNaN(c) ? " " : String.fromCharCode(c); })
+    .replace(/&#(\d+);/g, function(m, d){ var c = parseInt(d, 10); return isNaN(c) ? " " : String.fromCharCode(c); })
+    .replace(/&middot;/gi, "·")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&[a-zA-Z]+;/g, " ");
 }
 function extractFromText(rawText, ctx, engineLabel){
   var body = String(rawText);
   var mc = body.indexOf("Markdown Content:");
   if(mc >= 0) body = body.slice(mc + "Markdown Content:".length);
-  var text = cleanRelayText(body);
+  var text = cleanRelayText(decodeEntities(body));
   var urlSpans = [], um, urlRe = /\(https?[^)]*\)/g;
   while((um = urlRe.exec(text)) !== null){ urlSpans.push([um.index, um.index + um[0].length]); }
   function inUrl(pos){ for(var i = 0; i < urlSpans.length; i++){ if(pos >= urlSpans[i][0] && pos <= urlSpans[i][1]) return true; } return false; }
@@ -809,7 +826,7 @@ function extractFromText(rawText, ctx, engineLabel){
     return lastPeople || (lastAny && lastAny !== "duckduckgo.com" && lastAny !== "bing.com" ? lastAny : "") || "search results";
   }
   var byUnit = {};
-  var unitRe = /\b(?:Apt|Apartment|Unit|Ste|Suite|Dept|Rm|Room|Bldg|Spc)\s*\.?\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b|#\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b/gi;
+  var unitRe = /\b(?:Apt|Apartment|Unit|Ste|Suite|Dept|Rm|Room|Bldg|Spc)\s*\.?\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b|(?:^|[^&\w;])#\s*([A-Za-z0-9][A-Za-z0-9-]{0,4})\b/gi;
   var m;
   while((m = unitRe.exec(text)) !== null){
     var tok = (m[1] || m[2] || "").toUpperCase();
