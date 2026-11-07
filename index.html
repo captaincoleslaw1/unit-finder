@@ -110,8 +110,10 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v33</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v34</p>
 
+<link rel="preconnect" href="https://address-rescue-search.addressrescue.workers.dev">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 var $ = function(id){ return document.getElementById(id); };
@@ -637,13 +639,32 @@ function fillResult(best, bestScore){
   setTimeout(function(){ var fn = $("f-name"); if(fn) fn.scrollIntoView({ behavior: "smooth", block: "center" }); }, 900);
 }
 
+var ocrWorkerPromise = null;
+function getOcrWorker(){
+  if(!ocrWorkerPromise){
+    ocrWorkerPromise = (async function(){
+      try {
+        var w = await Tesseract.createWorker("eng");
+        try { await w.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
+        return w;
+      } catch(e){ ocrWorkerPromise = null; return null; }
+    })();
+  }
+  return ocrWorkerPromise;
+}
+// Speed pass (v34): warm the reading engine in the background once the page
+// is open, and keep one worker alive between scans, so a scan no longer
+// sits through the engine spin-up every time.
+window.addEventListener("load", function(){
+  var warm = function(){ try { getOcrWorker(); } catch(e){} };
+  if("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 4000 });
+  else setTimeout(warm, 2500);
+});
+
 async function ocrSource(source, sw, sh, tight){
   $("status").classList.add("working"); $("status").textContent = "Reading…";
   var worker = null;
-  try {
-    worker = await Tesseract.createWorker("eng");
-    try { await worker.setParameters({ tessedit_pageseg_mode: "6" }); } catch(e){}
-  } catch(e){ worker = null; }
+  try { worker = await getOcrWorker(); } catch(e){ worker = null; }
   var passes = tight
     ? [[0, 1, "stretch"], [0, 1, "binary"], [0, 1, "binaryHi"]]
     : [[0, 1, "stretch"], [0, 0.55, "stretch"], [0.12, 0.7, "stretch"], [0, 1, "binary"]];
@@ -664,7 +685,6 @@ async function ocrSource(source, sw, sh, tight){
       if(bestScore >= 17) break;
     } catch(e){}
   }
-  if(worker){ try { await worker.terminate(); } catch(e){} }
   fillResult(best, bestScore);
 }
 
@@ -919,6 +939,7 @@ async function runMiner(){
   if(prog) prog.style.display = "block";
   if(progFill) progFill.style.width = "0%";
   var merged = {}, answered = {}, settled = 0, totalPlanned = 10; var diag = [], ddgAnswered = 0, ddgCands = 0;
+  var earlyShown = false, userActed = false;
   var passes = [
     { q: queries[0], label: "DuckDuckGo", path: "/ddg" }, { q: queries[0], label: "Bing", path: "/bing" },
     { q: queries[1], label: "DuckDuckGo", path: "/ddg" }, { q: queries[1], label: "Bing", path: "/bing" },
@@ -928,7 +949,7 @@ async function runMiner(){
   async function runPass(p){
     var useLite = p.path === "/ddg" && (ddgLite || p.lite);
     var rec = { engine: p.label + (useLite ? " (lite)" : ""), query: p.q, outcome: "", count: 0, best: 0 }; diag.push(rec);
-    var res = await fetchTextM(WORKER + p.path + "?q=" + encodeURIComponent(p.q) + (useLite ? "&lite=1" : ""), 12000); var txt = res.text;
+    var res = await fetchTextM(WORKER + p.path + "?q=" + encodeURIComponent(p.q) + (useLite ? "&lite=1" : ""), 8000); var txt = res.text;
     settled++;
     if(progFill) progFill.style.width = Math.min(96, Math.round(settled / totalPlanned * 100)) + "%";
     if(res.status >= 400){ rec.outcome = "HTTP " + res.status; return false; }
@@ -944,10 +965,58 @@ async function runMiner(){
     // (the 264 W 21st St Apt 1 false positive, Nov 1, 2026).
     var pc = {};
     list.forEach(function(r){ mergeCandidates(pc, extractFromText("(" + (r.link || "") + ") " + (r.title || "") + " " + (r.snippet || ""), ctx, p.label)); });
-    rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc);
+    rec.count = Object.keys(pc).length; Object.keys(pc).forEach(function(k){ if(pc[k].score > rec.best) rec.best = pc[k].score; }); if(p.label === "DuckDuckGo"){ ddgAnswered++; ddgCands += rec.count; } mergeCandidates(merged, pc); maybeEarly();
     return true;
   }
   async function runGooglePass(q){ return runPass({ q: q, label: "Google", path: "/search" }); }
+  function renderSuggestionCard(cands, isFinal){
+    var top = cands[0];
+    var nSources = Object.keys(top.domains).length;
+    var tier = top.score >= 4 ? "Strong: " + nSources + " sources agree." :
+               top.score >= 2 ? "One solid source. Treat it as a lead and sanity-check it." :
+                                "Weak: a single passing mention. Verify before trusting it.";
+    if(isFinal) st.textContent = "";
+    out.innerHTML = "";
+    var card = document.createElement("div");
+    card.style.cssText = "border-top:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; padding:14px 0; margin-top:12px; background:none";
+    var head = document.createElement("div");
+    head.style.cssText = "font-size:18px; font-weight:700";
+    head.textContent = "Suggested unit: " + top.unit;
+    card.appendChild(head); var verifyNote = document.createElement("div"); verifyNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; verifyNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; card.appendChild(verifyNote);
+    var tierEl = document.createElement("div");
+    tierEl.style.cssText = "font-size:14px; margin:4px 0 8px";
+    tierEl.textContent = tier;
+    card.appendChild(tierEl);
+    top.evidence.forEach(function(ev){
+      var e = document.createElement("div");
+      e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
+      e.textContent = ev.domain + " (via " + ev.engine + "): “" + ev.text + "”";
+      card.appendChild(e);
+    });
+    if(cands[1]){
+      var alt = document.createElement("div");
+      alt.style.cssText = "font-size:13px; color:#7a4d00; margin-top:6px";
+      alt.textContent = "Another candidate showed up: " + cands[1].unit + " (" + Object.keys(cands[1].domains).length + " source). Mixed signals, extra reason to check.";
+      card.appendChild(alt);
+    }
+    var row = document.createElement("div");
+    row.style.cssText = "display:flex; gap:8px; margin-top:10px";
+    var acc = document.createElement("button");
+    acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
+    acc.addEventListener("click", function(){ userActed = true; var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); st.textContent = ""; });
+    var dis = document.createElement("button");
+    dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
+    dis.addEventListener("click", function(){ userActed = true; out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
+    row.appendChild(acc); row.appendChild(dis);
+    card.appendChild(row);
+    out.appendChild(card);
+    if(!isFinal) st.textContent = "Strong match found early, showing it now. Still checking the rest\u2026";
+  }
+  function maybeEarly(){
+    if(earlyShown || userActed) return;
+    var cs = Object.keys(merged).map(function(k){ return merged[k]; }).sort(function(a, b){ return b.score - a.score; }).filter(function(c){ return c.score >= 2; });
+    if(cs.length && cs[0].score >= 4){ earlyShown = true; renderSuggestionCard(cs, false); }
+  }
   function renderFinderDetails(summaryText){ var box = $("finderDetails"); if(!box) return; box.innerHTML = ""; var det = document.createElement("details"); det.className = "finder-details"; var sm = document.createElement("summary"); sm.textContent = "Finder details"; det.appendChild(sm); diag.forEach(function(d){ var ln = document.createElement("div"); ln.textContent = d.engine + " - \"" + d.query + "\" - " + d.outcome + " - " + (d.count ? d.count + " candidate" + (d.count === 1 ? "" : "s") + ", best score " + d.best : "no candidates"); det.appendChild(ln); }); var sl = document.createElement("div"); sl.textContent = summaryText; det.appendChild(sl); box.appendChild(det); } async function runAllPasses(){
     ddgAnswered = 0; ddgCands = 0; settled = 0;
   st.textContent = "Reading snippets from Google, DuckDuckGo, and Bing at the same time…";
@@ -997,44 +1066,12 @@ async function runMiner(){
     return;
   }
   var top = cands[0];
-  var nSources = Object.keys(top.domains).length;
-  var tier = top.score >= 4 ? "Strong: " + nSources + " sources agree." :
-             top.score >= 2 ? "One solid source. Treat it as a lead and sanity-check it." :
-                              "Weak: a single passing mention. Verify before trusting it.";
-  st.textContent = "";
-  var card = document.createElement("div");
-  card.style.cssText = "border-top:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; padding:14px 0; margin-top:12px; background:none";
-  var head = document.createElement("div");
-  head.style.cssText = "font-size:18px; font-weight:700";
-  head.textContent = "Suggested unit: " + top.unit;
-  card.appendChild(head); var verifyNote = document.createElement("div"); verifyNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; verifyNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; card.appendChild(verifyNote);
-  var tierEl = document.createElement("div");
-  tierEl.style.cssText = "font-size:14px; margin:4px 0 8px";
-  tierEl.textContent = tier;
-  card.appendChild(tierEl);
-  top.evidence.forEach(function(ev){
-    var e = document.createElement("div");
-    e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
-    e.textContent = ev.domain + " (via " + ev.engine + "): “" + ev.text + "”";
-    card.appendChild(e);
-  });
-  if(cands[1]){
-    var alt = document.createElement("div");
-    alt.style.cssText = "font-size:13px; color:#7a4d00; margin-top:6px";
-    alt.textContent = "Another candidate showed up: " + cands[1].unit + " (" + Object.keys(cands[1].domains).length + " source). Mixed signals, extra reason to check.";
-    card.appendChild(alt);
+  if(userActed){
+    renderFinderDetails("Best: unit " + top.unit + ", score " + top.score);
+  } else {
+    renderSuggestionCard(cands, true);
+    renderFinderDetails("Best: unit " + top.unit + ", score " + top.score);
   }
-  var row = document.createElement("div");
-  row.style.cssText = "display:flex; gap:8px; margin-top:10px";
-  var acc = document.createElement("button");
-  acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
-  acc.addEventListener("click", function(){ var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); st.textContent = ""; });
-  var dis = document.createElement("button");
-  dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
-  dis.addEventListener("click", function(){ out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
-  row.appendChild(acc); row.appendChild(dis);
-  card.appendChild(row);
-  out.appendChild(card); renderFinderDetails("Best: unit " + top.unit + ", score " + top.score);
   updateNewBtn();
 }
 $("mineBtn").addEventListener("click", runMiner);
