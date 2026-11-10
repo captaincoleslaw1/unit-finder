@@ -110,7 +110,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v35</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v36</p>
 
 <link rel="preconnect" href="https://address-rescue-search.addressrescue.workers.dev">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -956,7 +956,7 @@ async function runMiner(){
   if(prog) prog.style.display = "block";
   if(progFill) progFill.style.width = "0%";
   var merged = {}, answered = {}, settled = 0, totalPlanned = 10; var diag = [], ddgAnswered = 0, ddgCands = 0;
-  var earlyShown = false, userActed = false;
+  var earlyShown = false, userActed = false, fbVoted = false;
   var passes = [
     { q: queries[0], label: "DuckDuckGo", path: "/ddg" }, { q: queries[0], label: "Bing", path: "/bing" },
     { q: queries[1], label: "DuckDuckGo", path: "/ddg" }, { q: queries[1], label: "Bing", path: "/bing" },
@@ -986,6 +986,42 @@ async function runMiner(){
     return true;
   }
   async function runGooglePass(q){ return runPass({ q: q, label: "Google", path: "/search" }); }
+  // Accuracy feedback (v36, at Thomas's request): after a find, ask whether
+  // the suggested unit was right and count the answer anonymously, so the
+  // nightly numbers can carry a hit rate. One vote per lookup; the row also
+  // rides along into the completed-address view after "Use unit".
+  function buildFeedback(){
+    var box = document.createElement("div");
+    box.style.cssText = "margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:10px";
+    if(fbVoted){
+      box.style.cssText += " font-size:13px; color:#33415c";
+      box.textContent = "Thanks, noted. That goes into the accuracy count.";
+      return box;
+    }
+    var q = document.createElement("div");
+    q.style.cssText = "font-size:14px; font-weight:600; margin-bottom:8px";
+    q.textContent = "Was this the right unit?";
+    box.appendChild(q);
+    var brow = document.createElement("div");
+    brow.style.cssText = "display:flex; gap:8px";
+    var yes = document.createElement("button");
+    yes.className = "ghost"; yes.style.flex = "1"; yes.textContent = "Yes, correct";
+    var no = document.createElement("button");
+    no.className = "ghost"; no.style.flex = "1"; no.textContent = "No, wrong";
+    function vote(kind){
+      if(fbVoted) return;
+      fbVoted = true;
+      arStats(kind);
+      box.innerHTML = "";
+      box.style.cssText += " font-size:13px; color:#33415c";
+      box.textContent = "Thanks, noted. That goes into the accuracy count.";
+    }
+    yes.addEventListener("click", function(){ vote("correct"); });
+    no.addEventListener("click", function(){ vote("wrong"); });
+    brow.appendChild(yes); brow.appendChild(no);
+    box.appendChild(brow);
+    return box;
+  }
   function renderSuggestionCard(cands, isFinal){
     var top = cands[0];
     var nSources = Object.keys(top.domains).length;
@@ -1020,12 +1056,13 @@ async function runMiner(){
     row.style.cssText = "display:flex; gap:8px; margin-top:10px";
     var acc = document.createElement("button");
     acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
-    acc.addEventListener("click", function(){ userActed = true; var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); st.textContent = ""; });
+    acc.addEventListener("click", function(){ userActed = true; var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); out.appendChild(buildFeedback()); st.textContent = ""; });
     var dis = document.createElement("button");
     dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
     dis.addEventListener("click", function(){ userActed = true; out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
     row.appendChild(acc); row.appendChild(dis);
     card.appendChild(row);
+    card.appendChild(buildFeedback());
     out.appendChild(card);
     if(!isFinal) st.textContent = "Strong match found early, showing it now. Still checking the rest\u2026";
   }
