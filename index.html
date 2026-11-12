@@ -21,8 +21,9 @@
   #mineBtn:disabled { opacity: .9; animation: btnpulse 1.15s ease-in-out infinite; }
   @keyframes btnpulse { 0%,100% { box-shadow: 0 6px 14px rgba(15,118,110,.30); } 50% { box-shadow: 0 6px 22px rgba(20,184,166,.65); } }
   #status { min-height: 20px; font-size: 14px; color: #33415c; margin-top: 10px; white-space: pre-wrap; }
-  label { display: block; font-size: 12.5px; font-weight: 600; color: #64748b; letter-spacing: .3px; margin: 8px 0 3px; }
-  input { width: 100%; font: inherit; font-size: 16px; padding: 9px; border: 1.5px solid #ccd7e6; border-radius: 12px; background: #fcfdff; }
+  label { display: block; font-size: 12.5px; font-weight: 600; color: #475569; letter-spacing: .3px; margin: 8px 0 3px; }
+  input { width: 100%; font: inherit; font-size: 16px; padding: 9px; border: 1.5px solid #a8bdd8; border-radius: 12px; background: #fcfdff; }
+  #f-state { text-transform: uppercase; }
   input:focus { outline: none; border-color: #0b5fff; box-shadow: 0 0 0 4px rgba(11,95,255,.15); background: #fff; }
   .row { display: flex; gap: 10px; }
   .row > div { flex: 1; }
@@ -57,7 +58,7 @@
 </head>
 <body>
 
-<header class="logo-header"><h1><img src="logo.jpg" alt="Address Rescue" style="width:100%; max-width:380px; height:auto; display:block; margin:0 auto;"></h1></header>
+<header class="logo-header"><h1><img src="logo.jpg" alt="Address Rescue" style="width:100%; max-width:250px; height:auto; display:block; margin:0 auto;"></h1></header>
 
 <div class="section">
   <h2>To find a complete address, enter it below</h2>
@@ -110,7 +111,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v36</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v37</p>
 
 <link rel="preconnect" href="https://address-rescue-search.addressrescue.workers.dev">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -1004,10 +1005,11 @@ async function runMiner(){
     box.appendChild(q);
     var brow = document.createElement("div");
     brow.style.cssText = "display:flex; gap:8px";
+    var fbBtn = "flex:1; padding:12px; font-size:16px; font-weight:600; background:#fff; border:1.5px solid #0b5fff; color:#0b3d91; border-radius:12px";
     var yes = document.createElement("button");
-    yes.className = "ghost"; yes.style.flex = "1"; yes.textContent = "Yes, correct";
+    yes.style.cssText = fbBtn; yes.textContent = "Yes, correct";
     var no = document.createElement("button");
-    no.className = "ghost"; no.style.flex = "1"; no.textContent = "No, wrong";
+    no.style.cssText = fbBtn; no.textContent = "No, wrong";
     function vote(kind){
       if(fbVoted) return;
       fbVoted = true;
@@ -1032,18 +1034,32 @@ async function runMiner(){
     out.innerHTML = "";
     var card = document.createElement("div");
     card.style.cssText = "border-top:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; padding:14px 0; margin-top:12px; background:none";
+    var headLabel = document.createElement("div");
+    headLabel.style.cssText = "font-size:13px; font-weight:600; letter-spacing:.4px; color:#475569";
+    headLabel.textContent = "SUGGESTED UNIT";
+    card.appendChild(headLabel);
     var head = document.createElement("div");
-    head.style.cssText = "font-size:18px; font-weight:700";
-    head.textContent = "Suggested unit: " + top.unit;
-    card.appendChild(head); var verifyNote = document.createElement("div"); verifyNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; verifyNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; card.appendChild(verifyNote);
+    head.style.cssText = "font-size:42px; font-weight:800; line-height:1.1; color:#0f2440";
+    head.textContent = top.unit;
+    card.appendChild(head); var verifyNote = document.createElement("div"); verifyNote.style.cssText = "font-size:13px; font-weight:600; color:#33415c; margin:6px 0 8px"; verifyNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; card.appendChild(verifyNote);
     var tierEl = document.createElement("div");
     tierEl.style.cssText = "font-size:14px; margin:4px 0 8px";
     tierEl.textContent = tier;
     card.appendChild(tierEl);
+    var evSeen = {};
     top.evidence.forEach(function(ev){
+      var key = String(ev.text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 110);
+      if(key && evSeen[key]) return;
+      if(key) evSeen[key] = 1;
+      var txt = String(ev.text || "");
+      if(txt.length > 220){
+        var ui = txt.toUpperCase().indexOf(String(top.unit).toUpperCase());
+        if(ui >= 0){ var from = Math.max(0, ui - 90); var to = Math.min(txt.length, ui + 110); txt = (from > 0 ? "\u2026" : "") + txt.slice(from, to).trim() + (to < txt.length ? "\u2026" : ""); }
+        else txt = txt.slice(0, 200).trim() + "\u2026";
+      }
       var e = document.createElement("div");
       e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
-      e.textContent = ev.domain + " (via " + ev.engine + "): “" + ev.text + "”";
+      e.textContent = ev.domain + " (via " + ev.engine + "): “" + txt + "”";
       card.appendChild(e);
     });
     if(cands[1]){
@@ -1056,7 +1072,7 @@ async function runMiner(){
     row.style.cssText = "display:flex; gap:8px; margin-top:10px";
     var acc = document.createElement("button");
     acc.className = "go"; acc.style.flex = "1"; acc.textContent = "Use unit " + top.unit;
-    acc.addEventListener("click", function(){ userActed = true; var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:14px; font-weight:700; color:#0f2440; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); out.appendChild(buildFeedback()); st.textContent = ""; });
+    acc.addEventListener("click", function(){ userActed = true; var cStreet = splitUnit($("f-street").value.trim()).street; out.innerHTML = ""; var lines = [$("f-name").value.trim(), cStreet + " Apt " + top.unit, $("f-city").value.trim() + ", " + $("f-state").value.trim().toUpperCase() + " " + $("f-zip").value.trim()]; lines.forEach(function(l){ var d = document.createElement("div"); d.textContent = l; out.appendChild(d); }); var vNote = document.createElement("div"); vNote.style.cssText = "font-size:13px; font-weight:600; color:#33415c; margin:6px 0 8px"; vNote.textContent = "These are suggestions from public records and the web. Verify the unit before you deliver."; out.appendChild(vNote); out.appendChild(buildFeedback()); st.textContent = ""; });
     var dis = document.createElement("button");
     dis.className = "ghost"; dis.style.flex = "1"; dis.textContent = "Dismiss";
     dis.addEventListener("click", function(){ userActed = true; out.innerHTML = ""; st.textContent = "Suggestion dismissed."; });
@@ -1064,6 +1080,8 @@ async function runMiner(){
     card.appendChild(row);
     card.appendChild(buildFeedback());
     out.appendChild(card);
+    card.style.scrollMarginTop = "8px";
+    requestAnimationFrame(function(){ try { var r = card.getBoundingClientRect(); if(r.top > window.innerHeight - 80 || r.bottom < 0) card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e){} });
     if(!isFinal) st.textContent = "Strong match found early, showing it now. Still checking the rest\u2026";
   }
   function maybeEarly(){
@@ -1129,6 +1147,8 @@ async function runMiner(){
   updateNewBtn();
 }
 $("mineBtn").addEventListener("click", runMiner);
+var stateIn = $("f-state");
+if(stateIn) stateIn.addEventListener("input", function(){ var v = stateIn.value.toUpperCase(); if(v !== stateIn.value) stateIn.value = v; });
 </script>
 </body>
 </html>
