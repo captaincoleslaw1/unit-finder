@@ -111,7 +111,7 @@
 
 
 <p class="note">Privacy: the photo is read right here on your phone and is never uploaded or stored. The app keeps anonymous counts of visits and searches (no names, no addresses) just to measure use.</p>
-<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v37</p>
+<p class="note" style="font-size:12px; margin-top:14px">Disclaimer: Address Rescue suggests possible address completions from public sources. Results can be incomplete, outdated, or wrong, and are not guaranteed. Always verify an address before relying on it. Address Rescue is an independent tool and is not affiliated with or endorsed by the US Postal Service.</p><p class="ver">Address Rescue v38</p>
 
 <link rel="preconnect" href="https://address-rescue-search.addressrescue.workers.dev">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -1046,22 +1046,6 @@ async function runMiner(){
     tierEl.style.cssText = "font-size:14px; margin:4px 0 8px";
     tierEl.textContent = tier;
     card.appendChild(tierEl);
-    var evSeen = {};
-    top.evidence.forEach(function(ev){
-      var key = String(ev.text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 110);
-      if(key && evSeen[key]) return;
-      if(key) evSeen[key] = 1;
-      var txt = String(ev.text || "");
-      if(txt.length > 220){
-        var ui = txt.toUpperCase().indexOf(String(top.unit).toUpperCase());
-        if(ui >= 0){ var from = Math.max(0, ui - 90); var to = Math.min(txt.length, ui + 110); txt = (from > 0 ? "\u2026" : "") + txt.slice(from, to).trim() + (to < txt.length ? "\u2026" : ""); }
-        else txt = txt.slice(0, 200).trim() + "\u2026";
-      }
-      var e = document.createElement("div");
-      e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
-      e.textContent = ev.domain + " (via " + ev.engine + "): “" + txt + "”";
-      card.appendChild(e);
-    });
     if(cands[1]){
       var alt = document.createElement("div");
       alt.style.cssText = "font-size:13px; color:#7a4d00; margin-top:6px";
@@ -1079,6 +1063,22 @@ async function runMiner(){
     row.appendChild(acc); row.appendChild(dis);
     card.appendChild(row);
     card.appendChild(buildFeedback());
+    var evSeen = {};
+    top.evidence.forEach(function(ev){
+      var key = String(ev.text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 110);
+      if(key && evSeen[key]) return;
+      if(key) evSeen[key] = 1;
+      var txt = String(ev.text || "");
+      if(txt.length > 220){
+        var ui = txt.toUpperCase().indexOf(String(top.unit).toUpperCase());
+        if(ui >= 0){ var from = Math.max(0, ui - 90); var to = Math.min(txt.length, ui + 110); txt = (from > 0 ? "\u2026" : "") + txt.slice(from, to).trim() + (to < txt.length ? "\u2026" : ""); }
+        else txt = txt.slice(0, 200).trim() + "\u2026";
+      }
+      var e = document.createElement("div");
+      e.style.cssText = "font-size:13px; color:#33415c; margin:4px 0";
+      e.textContent = ev.domain + " (via " + ev.engine + "): “" + txt + "”";
+      card.appendChild(e);
+    });
     out.appendChild(card);
     card.style.scrollMarginTop = "8px";
     requestAnimationFrame(function(){ try { var r = card.getBoundingClientRect(); if(r.top > window.innerHeight - 80 || r.bottom < 0) card.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e){} });
